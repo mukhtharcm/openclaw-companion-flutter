@@ -32,6 +32,7 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  flutter_markdown_plus: ^1.0.7
   google_fonts: ^6.2.1
   openclaw_gateway:
     git:

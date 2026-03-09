@@ -32,7 +32,7 @@ class CompanionController extends ChangeNotifier {
   String? _connectedGatewayTitle;
   String? _activeStableId;
   String? _activeRunId;
-  String? _streamingSummary;
+  String? _streamingAssistantText;
   bool _autoConnectFired = false;
   CompanionTrustPrompt? _pendingTrustPrompt;
   GatewayConnectionState _connectionState = const GatewayConnectionState(
@@ -49,7 +49,7 @@ class CompanionController extends ChangeNotifier {
   GatewayVoiceWakeConfig? _voiceWake;
   GatewayCronStatusSummary? _cronStatus;
   List<GatewayNodeSummary> _nodes = const <GatewayNodeSummary>[];
-  List<JsonMap> _history = const <JsonMap>[];
+  List<GatewayChatMessage> _transcript = const <GatewayChatMessage>[];
   List<GatewayDiscoveredGateway> _discoveredGateways =
       const <GatewayDiscoveredGateway>[];
   final List<CompanionEventLine> _eventLines = <CompanionEventLine>[];
@@ -74,7 +74,7 @@ class CompanionController extends ChangeNotifier {
   String? get connectedGatewayTitle => _connectedGatewayTitle;
   String? get activeStableId => _activeStableId;
   String? get activeRunId => _activeRunId;
-  String? get streamingSummary => _streamingSummary;
+  String? get streamingAssistantText => _streamingAssistantText;
   GatewayClient? get client => _client;
   CompanionTrustPrompt? get pendingTrustPrompt => _pendingTrustPrompt;
   GatewayConnectionState get connectionState => _connectionState;
@@ -89,7 +89,7 @@ class CompanionController extends ChangeNotifier {
   GatewayVoiceWakeConfig? get voiceWake => _voiceWake;
   GatewayCronStatusSummary? get cronStatus => _cronStatus;
   List<GatewayNodeSummary> get nodes => _nodes;
-  List<JsonMap> get history => _history;
+  List<GatewayChatMessage> get transcript => _transcript;
   List<GatewayDiscoveredGateway> get discoveredGateways => _discoveredGateways;
   List<CompanionEventLine> get eventLines => List.unmodifiable(_eventLines);
   List<String> get activityLog => List.unmodifiable(_activityLog);
@@ -496,7 +496,8 @@ class CompanionController extends ChangeNotifier {
       _cronStatus = await cronStatusFuture;
       _nodes = await nodesFuture ?? const <GatewayNodeSummary>[];
       _sessionsPreview = await previewsFuture;
-      _history = await historyFuture;
+      _transcript = (await historyFuture).messages;
+      _streamingAssistantText = null;
       _appendLog('refreshed gateway state');
     } catch (error) {
       _setError(_describeUnknownError(error));
@@ -508,31 +509,30 @@ class CompanionController extends ChangeNotifier {
 
   Future<void> reloadHistory() async {
     try {
-      _history = await _fetchHistory(_config.preferredSessionKey);
+      final history = await _fetchHistory(_config.preferredSessionKey);
+      _transcript = history.messages;
+      if (_activeRunId == null) {
+        _streamingAssistantText = null;
+      }
       notifyListeners();
     } catch (error) {
       _appendLog('history load failed: ${_describeUnknownError(error)}');
     }
   }
 
-  Future<List<JsonMap>> _fetchHistory(String sessionKey) async {
+  Future<GatewayChatHistoryResult> _fetchHistory(String sessionKey) async {
     final client = _client;
     if (client == null || sessionKey.trim().isEmpty) {
-      return const <JsonMap>[];
+      return GatewayChatHistoryResult.fromJson(<String, Object?>{
+        'sessionKey': sessionKey,
+        'messages': const <Object?>[],
+      });
     }
 
-    final payload = await client.operator.chatHistory(
+    return client.query.chatHistory(
       sessionKey: sessionKey.trim(),
       limit: 24,
     );
-    final messages = payload['messages'];
-    if (messages is! List) {
-      return const <JsonMap>[];
-    }
-    return messages
-        .whereType<Object?>()
-        .map((entry) => _asJsonMap(entry, 'chat.history.messages[]'))
-        .toList(growable: false);
   }
 
   Future<void> sendPrompt(String prompt) async {
@@ -550,17 +550,23 @@ class CompanionController extends ChangeNotifier {
 
     _busy = true;
     _errorText = null;
+    final previousTranscript = List<GatewayChatMessage>.of(_transcript);
+    final optimisticTranscript = List<GatewayChatMessage>.of(previousTranscript)
+      ..add(_buildOptimisticUserMessage(trimmed));
+    _transcript = optimisticTranscript;
+    _streamingAssistantText = null;
     notifyListeners();
 
     try {
-      final payload = await client.operator.chatSend(
+      final payload = await client.admin.chatSend(
         sessionKey: _config.preferredSessionKey,
         message: trimmed,
         thinking: _config.thinking == 'default' ? null : _config.thinking,
       );
-      _appendLog('chat.send accepted: ${_truncate(_pretty(payload), 180)}');
-      await reloadHistory();
+      _activeRunId = payload.runId;
+      _appendLog('chat.send accepted: ${payload.status} (${payload.runId})');
     } catch (error) {
+      _transcript = previousTranscript;
       _setError(_describeUnknownError(error));
     } finally {
       _busy = false;
@@ -575,11 +581,15 @@ class CompanionController extends ChangeNotifier {
       return;
     }
     try {
-      await client.operator.chatAbort(
+      final result = await client.admin.chatAbort(
         sessionKey: _config.preferredSessionKey,
         runId: runId,
       );
-      _appendLog('requested chat abort for $runId');
+      _appendLog(
+        result.aborted
+            ? 'requested chat abort for $runId'
+            : 'chat abort skipped; run was already finished',
+      );
     } catch (error) {
       _setError(_describeUnknownError(error));
     }
@@ -641,7 +651,7 @@ class CompanionController extends ChangeNotifier {
     }
 
     _activeRunId = null;
-    _streamingSummary = null;
+    _streamingAssistantText = null;
     _serverVersion = null;
     _connectedGatewayTitle = null;
     _connectionState = const GatewayConnectionState(
@@ -658,13 +668,15 @@ class CompanionController extends ChangeNotifier {
     _voiceWake = null;
     _cronStatus = null;
     _nodes = const <GatewayNodeSummary>[];
-    _history = const <JsonMap>[];
+    _transcript = const <GatewayChatMessage>[];
     notifyListeners();
   }
 
   void selectSession(String key) {
     unawaited(setPreferredSessionKey(key));
     _appendLog('session selected: $key');
+    _activeRunId = null;
+    _streamingAssistantText = null;
     unawaited(reloadHistory());
   }
 
@@ -683,14 +695,42 @@ class CompanionController extends ChangeNotifier {
 
     if (frame.event == 'chat') {
       final event = GatewayChatEvent.fromEventFrame(frame);
-      if (event.sessionKey == _config.preferredSessionKey) {
-        _activeRunId = event.isTerminal ? null : event.runId;
-        final summary =
-            event.errorMessage ??
-            (event.message == null ? '(no payload)' : _pretty(event.message));
-        _streamingSummary = '${event.state}: ${_truncate(summary, 240)}';
+      if (_matchesSelectedChatSession(
+        sessionKey: event.sessionKey,
+        runId: event.runId,
+      )) {
         if (event.isTerminal) {
-          unawaited(reloadHistory());
+          _activeRunId = null;
+          _streamingAssistantText = null;
+          if (event.state == 'error' && event.errorMessage != null) {
+            _setError(event.errorMessage!);
+          } else {
+            unawaited(reloadHistory());
+          }
+        } else {
+          _activeRunId = event.runId;
+          final eventText = _extractChatText(event.message);
+          if (eventText != null) {
+            _streamingAssistantText = eventText;
+          }
+        }
+      }
+    }
+
+    if (frame.event == 'agent') {
+      final event = GatewayAgentEvent.fromEventFrame(frame);
+      if (_matchesSelectedChatSession(
+        sessionKey: event.sessionKey,
+        runId: event.runId,
+      )) {
+        if (event.streamName == 'assistant') {
+          final data = event.assistantData;
+          if (data?.text?.trim().isNotEmpty == true) {
+            _streamingAssistantText = data!.text;
+          } else if (data?.delta?.isNotEmpty == true) {
+            _streamingAssistantText =
+                (_streamingAssistantText ?? '') + data!.delta!;
+          }
         }
       }
     }
@@ -706,6 +746,60 @@ class CompanionController extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  bool _matchesSelectedChatSession({
+    required String? sessionKey,
+    required String? runId,
+  }) {
+    if (runId != null && runId == _activeRunId) {
+      return true;
+    }
+    if (sessionKey == null || sessionKey.trim().isEmpty) {
+      return false;
+    }
+    return gatewayChatSessionKeysMatch(
+      incoming: sessionKey,
+      current: _config.preferredSessionKey,
+    );
+  }
+
+  GatewayChatMessage _buildOptimisticUserMessage(String text) {
+    return GatewayChatMessage(
+      role: 'user',
+      content: <GatewayChatMessageContent>[GatewayChatMessageContent.text(text)],
+      timestamp: DateTime.now().millisecondsSinceEpoch.toDouble(),
+      raw: <String, Object?>{
+        'role': 'user',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'content': <Object?>[
+          <String, Object?>{
+            'type': 'text',
+            'text': text,
+          },
+        ],
+      },
+    );
+  }
+
+  String? _extractChatText(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      return value;
+    }
+    if (value is Map<Object?, Object?>) {
+      try {
+        final message = GatewayChatMessage.fromJson(
+          value.map((key, entry) => MapEntry(key.toString(), entry)),
+        );
+        return message.hasVisibleText ? message.primaryText : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   Future<T?> _loadOptional<T>(Future<T> Function() loader) async {
