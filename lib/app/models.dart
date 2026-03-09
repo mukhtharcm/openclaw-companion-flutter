@@ -2,20 +2,16 @@ import 'dart:convert';
 
 import 'package:openclaw_gateway/openclaw_gateway.dart';
 
-enum CompanionAuthMode {
-  token,
-  password,
-  none,
-}
+enum CompanionAuthMode { token, password, none }
 
 extension CompanionAuthModeLabel on CompanionAuthMode {
   String get storageValue => name;
 
   String get label => switch (this) {
-        CompanionAuthMode.token => 'Token',
-        CompanionAuthMode.password => 'Password',
-        CompanionAuthMode.none => 'Pairing',
-      };
+    CompanionAuthMode.token => 'Token',
+    CompanionAuthMode.password => 'Password',
+    CompanionAuthMode.none => 'None',
+  };
 
   static CompanionAuthMode fromStorage(String? raw) {
     return CompanionAuthMode.values.firstWhere(
@@ -25,21 +21,16 @@ extension CompanionAuthModeLabel on CompanionAuthMode {
   }
 }
 
-enum CompanionConnectionKind {
-  manual,
-  discovered,
-}
+enum CompanionConnectionKind { manual, discovered }
 
 class CompanionLastConnection {
-  const CompanionLastConnection.manual({
-    required this.url,
-  })  : kind = CompanionConnectionKind.manual,
-        stableId = null;
+  const CompanionLastConnection.manual({required this.url})
+    : kind = CompanionConnectionKind.manual,
+      stableId = null;
 
-  const CompanionLastConnection.discovered({
-    required this.stableId,
-  })  : kind = CompanionConnectionKind.discovered,
-        url = null;
+  const CompanionLastConnection.discovered({required this.stableId})
+    : kind = CompanionConnectionKind.discovered,
+      url = null;
 
   factory CompanionLastConnection.fromJson(JsonMap json) {
     final kind = switch (_readRequiredString(
@@ -49,24 +40,26 @@ class CompanionLastConnection {
     )) {
       'manual' => CompanionConnectionKind.manual,
       'discovered' => CompanionConnectionKind.discovered,
-      final other => throw FormatException('Unsupported connection kind $other'),
+      final other => throw FormatException(
+        'Unsupported connection kind $other',
+      ),
     };
 
     return switch (kind) {
       CompanionConnectionKind.manual => CompanionLastConnection.manual(
-          url: _readRequiredString(
-            json,
-            'url',
-            context: 'CompanionLastConnection.url',
-          ),
+        url: _readRequiredString(
+          json,
+          'url',
+          context: 'CompanionLastConnection.url',
         ),
+      ),
       CompanionConnectionKind.discovered => CompanionLastConnection.discovered(
-          stableId: _readRequiredString(
-            json,
-            'stableId',
-            context: 'CompanionLastConnection.stableId',
-          ),
+        stableId: _readRequiredString(
+          json,
+          'stableId',
+          context: 'CompanionLastConnection.stableId',
         ),
+      ),
     };
   }
 
@@ -110,7 +103,10 @@ class CompanionConfig {
       lastConnection: json['lastConnection'] == null
           ? null
           : CompanionLastConnection.fromJson(
-              _asJsonMap(json['lastConnection'], 'CompanionConfig.lastConnection'),
+              _asJsonMap(
+                json['lastConnection'],
+                'CompanionConfig.lastConnection',
+              ),
             ),
     );
   }
@@ -294,14 +290,16 @@ class CompanionEventLine {
 
 JsonMap _asJsonMap(Object? value, String context) {
   if (value is Map<Object?, Object?>) {
-    return value.map(
-      (key, entry) => MapEntry(key.toString(), entry),
-    );
+    return value.map((key, entry) => MapEntry(key.toString(), entry));
   }
   throw FormatException('Expected object for $context.');
 }
 
-String _readRequiredString(JsonMap json, String key, {required String context}) {
+String _readRequiredString(
+  JsonMap json,
+  String key, {
+  required String context,
+}) {
   final value = _readNullableString(json[key]);
   if (value == null || value.isEmpty) {
     throw FormatException('Missing $context.$key.');

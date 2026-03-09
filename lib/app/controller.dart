@@ -6,21 +6,18 @@ import 'package:openclaw_companion/app/models.dart';
 import 'package:openclaw_companion/app/store.dart';
 import 'package:openclaw_gateway/openclaw_gateway.dart';
 
-const List<String> companionOperatorScopes = <String>[
-  'operator.read',
-  'operator.write',
-  'operator.talk.secrets',
-];
-
 class CompanionController extends ChangeNotifier {
   CompanionController._({
     required CompanionConfigStore configStore,
     required GatewayJsonAuthStateStore authStateStore,
-  })  : _configStore = configStore,
-        _authStateStore = authStateStore;
+    required Future<void> Function() resetStoredState,
+  }) : _configStore = configStore,
+       _authStateStore = authStateStore,
+       _resetStoredState = resetStoredState;
 
   final CompanionConfigStore _configStore;
   final GatewayJsonAuthStateStore _authStateStore;
+  final Future<void> Function() _resetStoredState;
 
   GatewayClient? _client;
   StreamSubscription<GatewayConnectionState>? _connectionSubscription;
@@ -63,6 +60,7 @@ class CompanionController extends ChangeNotifier {
     final controller = CompanionController._(
       configStore: stores.configStore,
       authStateStore: stores.authStateStore,
+      resetStoredState: stores.resetAll,
     );
     await controller._initialize();
     return controller;
@@ -96,9 +94,19 @@ class CompanionController extends ChangeNotifier {
   List<CompanionEventLine> get eventLines => List.unmodifiable(_eventLines);
   List<String> get activityLog => List.unmodifiable(_activityLog);
   bool get connected => _connectionState.isConnected;
+  bool get needsInitialConnectionSetup =>
+      !connected &&
+      _config.manualUrl.trim().isEmpty &&
+      _config.lastConnection == null &&
+      _config.token.trim().isEmpty &&
+      _config.password.trim().isEmpty;
 
   Future<void> _initialize() async {
-    _config = await _configStore.load();
+    final loadedConfig = await _configStore.load();
+    _config = _normalizeConfig(loadedConfig);
+    if (_config.authMode != loadedConfig.authMode) {
+      await _persistConfig();
+    }
     _loading = false;
     notifyListeners();
     _startDiscovery();
@@ -141,7 +149,9 @@ class CompanionController extends ChangeNotifier {
       if (stableId == null) {
         return;
       }
-      final gateway = _discoveredGateways.cast<GatewayDiscoveredGateway?>().firstWhere(
+      final gateway = _discoveredGateways
+          .cast<GatewayDiscoveredGateway?>()
+          .firstWhere(
             (candidate) => candidate?.stableId == stableId,
             orElse: () => null,
           );
@@ -177,8 +187,8 @@ class CompanionController extends ChangeNotifier {
     final nextAuthMode = payload.token?.trim().isNotEmpty == true
         ? CompanionAuthMode.token
         : payload.password?.trim().isNotEmpty == true
-            ? CompanionAuthMode.password
-            : _config.authMode;
+        ? CompanionAuthMode.password
+        : _config.authMode;
     _config = _config.copyWith(
       manualUrl: uri.toString(),
       authMode: nextAuthMode,
@@ -207,7 +217,9 @@ class CompanionController extends ChangeNotifier {
   }
 
   Future<void> setThinking(String value) async {
-    _config = _config.copyWith(thinking: value.trim().isEmpty ? 'default' : value.trim());
+    _config = _config.copyWith(
+      thinking: value.trim().isEmpty ? 'default' : value.trim(),
+    );
     await _persistConfig();
     notifyListeners();
   }
@@ -278,11 +290,7 @@ class CompanionController extends ChangeNotifier {
     }
 
     final uri = storedFingerprint != null && !gateway.tlsEnabled
-        ? Uri(
-            scheme: 'wss',
-            host: gateway.targetHost,
-            port: gateway.port,
-          )
+        ? Uri(scheme: 'wss', host: gateway.targetHost, port: gateway.port)
         : gateway.primaryUri;
 
     final request = CompanionConnectionRequest(
@@ -333,7 +341,9 @@ class CompanionController extends ChangeNotifier {
       );
       if (stored == null) {
         try {
-          final fingerprint = await GatewayTlsProbe.probeFingerprint(request.uri);
+          final fingerprint = await GatewayTlsProbe.probeFingerprint(
+            request.uri,
+          );
           if (fingerprint == null) {
             _setError('Failed to read a TLS fingerprint from ${request.uri}.');
             return;
@@ -372,7 +382,6 @@ class CompanionController extends ChangeNotifier {
     await disconnect(quiet: true);
 
     try {
-      final identity = await _authStateStore.readOrCreateIdentity();
       final client = await GatewayClient.connect(
         uri: request.uri,
         auth: auth,
@@ -384,10 +393,7 @@ class CompanionController extends ChangeNotifier {
           displayName: 'OpenClaw Companion',
           deviceFamily: 'Companion',
         ),
-        scopes: companionOperatorScopes,
         autoReconnect: true,
-        deviceIdentity: identity,
-        deviceTokenStore: _authStateStore,
         tlsPolicy: request.uri.scheme == 'wss'
             ? GatewayTlsPolicy(
                 stableId: request.stableId,
@@ -420,7 +426,9 @@ class CompanionController extends ChangeNotifier {
       });
 
       _eventSubscription = client.events.listen(_handleEventFrame);
-      _appendLog('connected to ${request.title} (${client.hello.server.version})');
+      _appendLog(
+        'connected to ${request.title} (${client.hello.server.version})',
+      );
       await refresh();
     } catch (error) {
       _setError(_describeUnknownError(error));
@@ -578,12 +586,13 @@ class CompanionController extends ChangeNotifier {
   }
 
   Future<void> forgetCurrentTrust() async {
-    final stableId = _activeStableId ??
+    final stableId =
+        _activeStableId ??
         (_config.lastConnection?.kind == CompanionConnectionKind.discovered
             ? _config.lastConnection?.stableId
             : _config.lastConnection?.url == null
-                ? null
-                : _manualStableId(Uri.parse(_config.lastConnection!.url!)));
+            ? null
+            : _manualStableId(Uri.parse(_config.lastConnection!.url!)));
     if (stableId == null) {
       return;
     }
@@ -596,10 +605,24 @@ class CompanionController extends ChangeNotifier {
     _config = _config.copyWith(
       token: '',
       password: '',
-      authMode: CompanionAuthMode.none,
+      authMode: CompanionAuthMode.token,
     );
     await _persistConfig();
     _appendLog('cleared saved shared credentials');
+    notifyListeners();
+  }
+
+  Future<void> resetAllState() async {
+    await disconnect(quiet: true);
+    await _resetStoredState();
+    _config = const CompanionConfig();
+    _errorText = null;
+    _pendingTrustPrompt = null;
+    _activeStableId = null;
+    _autoConnectFired = false;
+    _eventLines.clear();
+    _activityLog.clear();
+    _appendLog('debug reset: cleared saved app state');
     notifyListeners();
   }
 
@@ -662,7 +685,8 @@ class CompanionController extends ChangeNotifier {
       final event = GatewayChatEvent.fromEventFrame(frame);
       if (event.sessionKey == _config.preferredSessionKey) {
         _activeRunId = event.isTerminal ? null : event.runId;
-        final summary = event.errorMessage ??
+        final summary =
+            event.errorMessage ??
             (event.message == null ? '(no payload)' : _pretty(event.message));
         _streamingSummary = '${event.state}: ${_truncate(summary, 240)}';
         if (event.isTerminal) {
@@ -718,6 +742,19 @@ class CompanionController extends ChangeNotifier {
 
   Future<void> _persistConfig() async {
     await _configStore.save(_config);
+  }
+
+  CompanionConfig _normalizeConfig(CompanionConfig config) {
+    if (config.authMode != CompanionAuthMode.none) {
+      return config;
+    }
+    if (config.token.trim().isNotEmpty) {
+      return config.copyWith(authMode: CompanionAuthMode.token);
+    }
+    if (config.password.trim().isNotEmpty) {
+      return config.copyWith(authMode: CompanionAuthMode.password);
+    }
+    return config.copyWith(authMode: CompanionAuthMode.token);
   }
 
   void _setError(String message) {
@@ -777,8 +814,8 @@ class CompanionController extends ChangeNotifier {
     final port = uri.hasPort
         ? uri.port
         : uri.scheme == 'wss'
-            ? 443
-            : 80;
+        ? 443
+        : 80;
     return 'manual|${uri.host}:$port';
   }
 }
@@ -809,9 +846,7 @@ String _clockNow() {
 
 JsonMap _asJsonMap(Object? value, String context) {
   if (value is Map<Object?, Object?>) {
-    return value.map(
-      (key, entry) => MapEntry(key.toString(), entry),
-    );
+    return value.map((key, entry) => MapEntry(key.toString(), entry));
   }
   throw FormatException('Expected object for $context.');
 }

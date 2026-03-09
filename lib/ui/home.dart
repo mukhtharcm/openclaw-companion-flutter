@@ -1,16 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:openclaw_companion/app/controller.dart';
 import 'package:openclaw_companion/app/models.dart';
 import 'package:openclaw_gateway/openclaw_gateway.dart';
 
 class CompanionHome extends StatefulWidget {
-  const CompanionHome({
-    super.key,
-    required this.controller,
-  });
+  const CompanionHome({super.key, required this.controller});
 
   final CompanionController controller;
 
@@ -19,8 +17,6 @@ class CompanionHome extends StatefulWidget {
 }
 
 class _CompanionHomeState extends State<CompanionHome> {
-  final GlobalKey<ScaffoldState> _mobileScaffoldKey =
-      GlobalKey<ScaffoldState>();
   final TextEditingController _setupCodeController = TextEditingController();
   final TextEditingController _urlController = TextEditingController();
   final TextEditingController _tokenController = TextEditingController();
@@ -35,10 +31,18 @@ class _CompanionHomeState extends State<CompanionHome> {
   String? _shownPromptStableId;
 
   static const List<_SectionItem> _sections = <_SectionItem>[
-    _SectionItem('Overview', Icons.dashboard_outlined, Icons.dashboard),
-    _SectionItem('Sessions', Icons.forum_outlined, Icons.forum),
-    _SectionItem('Explore', Icons.travel_explore_outlined, Icons.travel_explore),
-    _SectionItem('Events', Icons.bolt_outlined, Icons.bolt),
+    _SectionItem('Home', Icons.grid_view_outlined, Icons.grid_view_rounded),
+    _SectionItem('Chat', Icons.forum_outlined, Icons.forum_rounded),
+    _SectionItem(
+      'Inspect',
+      Icons.travel_explore_outlined,
+      Icons.travel_explore_rounded,
+    ),
+    _SectionItem(
+      'Logs',
+      Icons.receipt_long_outlined,
+      Icons.receipt_long_rounded,
+    ),
   ];
 
   @override
@@ -64,12 +68,15 @@ class _CompanionHomeState extends State<CompanionHome> {
     _tokenController.text = config.token;
     _passwordController.text = config.password;
     _sessionController.text = config.preferredSessionKey;
-    _draftAuthMode = config.authMode;
+    _draftAuthMode = config.authMode == CompanionAuthMode.none
+        ? CompanionAuthMode.token
+        : config.authMode;
     _draftAutoConnect = config.autoConnect;
     _draftThinking = config.thinking;
   }
 
   Future<void> _connectManual() async {
+    final hadPrompt = widget.controller.pendingTrustPrompt != null;
     await widget.controller.connectManual(
       _urlController.text,
       authMode: _draftAuthMode,
@@ -77,9 +84,14 @@ class _CompanionHomeState extends State<CompanionHome> {
       password: _passwordController.text,
       autoConnect: _draftAutoConnect,
     );
+    if (!mounted) {
+      return;
+    }
+    _maybeCloseConnectionsPanel(hadPrompt: hadPrompt);
   }
 
   Future<void> _importSetupCode() async {
+    final hadPrompt = widget.controller.pendingTrustPrompt != null;
     final config = await widget.controller.importSetupCode(
       _setupCodeController.text,
     );
@@ -90,6 +102,155 @@ class _CompanionHomeState extends State<CompanionHome> {
       _applyConfig(config);
       _setupCodeController.clear();
     });
+    _maybeCloseConnectionsPanel(hadPrompt: hadPrompt);
+  }
+
+  Widget _buildConnectionPanel({required bool embedded}) {
+    return _ConnectionPanel(
+      controller: widget.controller,
+      setupCodeController: _setupCodeController,
+      urlController: _urlController,
+      tokenController: _tokenController,
+      passwordController: _passwordController,
+      authMode: _draftAuthMode,
+      embedded: embedded,
+      autoConnect: _draftAutoConnect,
+      onAuthModeChanged: (value) {
+        setState(() {
+          _draftAuthMode = value;
+        });
+      },
+      onAutoConnectChanged: (value) {
+        setState(() {
+          _draftAutoConnect = value;
+        });
+        unawaited(widget.controller.setAutoConnect(value));
+      },
+      onImportSetupCode: _importSetupCode,
+      onConnectManual: _connectManual,
+      onConnectDiscovered: (gateway) {
+        unawaited(() async {
+          final hadPrompt = widget.controller.pendingTrustPrompt != null;
+          await widget.controller.connectDiscovered(
+            gateway,
+            authMode: _draftAuthMode,
+            token: _tokenController.text,
+            password: _passwordController.text,
+            autoConnect: _draftAutoConnect,
+          );
+          if (!mounted) {
+            return;
+          }
+          _maybeCloseConnectionsPanel(hadPrompt: hadPrompt);
+        }());
+      },
+      onDisconnect: () => unawaited(widget.controller.disconnect()),
+      onForgetTrust: () => unawaited(widget.controller.forgetCurrentTrust()),
+      onClearSavedCredentials: () async {
+        await widget.controller.clearSavedCredentials();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _tokenController.clear();
+          _passwordController.clear();
+          _draftAuthMode = CompanionAuthMode.token;
+        });
+      },
+      onResetAllDebug: () async {
+        await widget.controller.resetAllState();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _setupCodeController.clear();
+          _urlController.clear();
+          _tokenController.clear();
+          _passwordController.clear();
+          _sessionController.text =
+              widget.controller.config.preferredSessionKey;
+          _promptController.clear();
+          _applyConfig(widget.controller.config);
+        });
+      },
+    );
+  }
+
+  Future<void> _openConnectionsPanel({required bool desktop}) async {
+    if (!mounted) {
+      return;
+    }
+    final sheet = _ConnectionsSheet(
+      desktop: desktop,
+      child: _buildConnectionPanel(embedded: true),
+    );
+    if (desktop) {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierLabel: 'Connections',
+        barrierDismissible: true,
+        barrierColor: const Color(0x33000000),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return Material(
+            type: MaterialType.transparency,
+            child: SafeArea(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: 440,
+                      minWidth: 380,
+                      maxHeight: double.infinity,
+                    ),
+                    child: sheet,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.08, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: FadeTransition(opacity: curved, child: child),
+          );
+        },
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final viewInsets = MediaQuery.of(context).viewInsets;
+        return Padding(
+          padding: EdgeInsets.only(bottom: viewInsets.bottom),
+          child: FractionallySizedBox(heightFactor: 0.92, child: sheet),
+        );
+      },
+    );
+  }
+
+  void _maybeCloseConnectionsPanel({required bool hadPrompt}) {
+    final hasPromptNow = widget.controller.pendingTrustPrompt != null;
+    if (hasPromptNow && !hadPrompt) {
+      return;
+    }
+    if (widget.controller.connected && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   void _maybeShowTrustPrompt(CompanionController controller) {
@@ -122,9 +283,9 @@ class _CompanionHomeState extends State<CompanionHome> {
                 const SizedBox(height: 16),
                 SelectableText(
                   prompt.fingerprint,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontFamily: 'monospace',
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -167,53 +328,7 @@ class _CompanionHomeState extends State<CompanionHome> {
 
         return LayoutBuilder(
           builder: (context, constraints) {
-            final desktop = constraints.maxWidth >= 1120;
-            final connectionPanel = _ConnectionPanel(
-              controller: controller,
-              setupCodeController: _setupCodeController,
-              urlController: _urlController,
-              tokenController: _tokenController,
-              passwordController: _passwordController,
-              authMode: _draftAuthMode,
-              autoConnect: _draftAutoConnect,
-              onAuthModeChanged: (value) {
-                setState(() {
-                  _draftAuthMode = value;
-                });
-              },
-              onAutoConnectChanged: (value) {
-                setState(() {
-                  _draftAutoConnect = value;
-                });
-                unawaited(controller.setAutoConnect(value));
-              },
-              onImportSetupCode: _importSetupCode,
-              onConnectManual: _connectManual,
-              onConnectDiscovered: (gateway) {
-                unawaited(
-                  controller.connectDiscovered(
-                    gateway,
-                    authMode: _draftAuthMode,
-                    token: _tokenController.text,
-                    password: _passwordController.text,
-                    autoConnect: _draftAutoConnect,
-                  ),
-                );
-              },
-              onDisconnect: () => unawaited(controller.disconnect()),
-              onForgetTrust: () => unawaited(controller.forgetCurrentTrust()),
-              onClearSavedCredentials: () async {
-                await controller.clearSavedCredentials();
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _tokenController.clear();
-                  _passwordController.clear();
-                  _draftAuthMode = CompanionAuthMode.none;
-                });
-              },
-            );
+            final desktop = constraints.maxWidth >= 860;
 
             final body = _CompanionBody(
               controller: controller,
@@ -221,6 +336,9 @@ class _CompanionHomeState extends State<CompanionHome> {
               sessionController: _sessionController,
               promptController: _promptController,
               thinking: _draftThinking,
+              onOpenConnections: () =>
+                  unawaited(_openConnectionsPanel(desktop: desktop)),
+              onRefresh: () => unawaited(controller.refresh()),
               onThinkingChanged: (value) {
                 setState(() {
                   _draftThinking = value;
@@ -259,33 +377,28 @@ class _CompanionHomeState extends State<CompanionHome> {
             if (desktop) {
               return Scaffold(
                 body: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: <Color>[Color(0xFFF4F6F2), Color(0xFFE7ECE7)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
+                  decoration: const BoxDecoration(color: Color(0xFFF0F2EE)),
                   child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Row(
-                        children: <Widget>[
-                          SizedBox(width: 340, child: connectionPanel),
-                          const SizedBox(width: 24),
-                          Expanded(
-                            child: _DesktopShell(
-                              selectedSection: _selectedSection,
-                              onSectionSelected: (value) {
-                                setState(() {
-                                  _selectedSection = value;
-                                });
-                              },
-                              body: body,
-                            ),
+                    child: Row(
+                      children: <Widget>[
+                        _DesktopSidebar(
+                          controller: controller,
+                          selectedSection: _selectedSection,
+                          onOpenConnections: () =>
+                              unawaited(_openConnectionsPanel(desktop: true)),
+                          onSectionSelected: (value) {
+                            setState(() {
+                              _selectedSection = value;
+                            });
+                          },
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(28, 24, 32, 28),
+                            child: body,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -293,43 +406,26 @@ class _CompanionHomeState extends State<CompanionHome> {
             }
 
             return Scaffold(
-              key: _mobileScaffoldKey,
-              appBar: AppBar(
-                title: const Text('OpenClaw Companion'),
-                actions: <Widget>[
-                  IconButton(
-                    icon: const Icon(Icons.settings_input_component_outlined),
-                    onPressed: () {
-                      _mobileScaffoldKey.currentState?.openEndDrawer();
-                    },
-                  ),
-                ],
-              ),
-              endDrawer: Drawer(
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: connectionPanel,
-                  ),
+              body: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: body,
                 ),
               ),
-              body: body,
-              bottomNavigationBar: NavigationBar(
-                selectedIndex: _selectedSection,
-                onDestinationSelected: (value) {
-                  setState(() {
-                    _selectedSection = value;
-                  });
-                },
-                destinations: _sections
-                    .map(
-                      (item) => NavigationDestination(
-                        icon: Icon(item.icon),
-                        selectedIcon: Icon(item.selectedIcon),
-                        label: item.label,
-                      ),
-                    )
-                    .toList(growable: false),
+              bottomNavigationBar: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  child: _CompactNavBar(
+                    selectedIndex: _selectedSection,
+                    items: _sections,
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedSection = value;
+                      });
+                    },
+                  ),
+                ),
               ),
             );
           },
@@ -339,55 +435,234 @@ class _CompanionHomeState extends State<CompanionHome> {
   }
 }
 
-class _DesktopShell extends StatelessWidget {
-  const _DesktopShell({
+class _DesktopSidebar extends StatelessWidget {
+  const _DesktopSidebar({
+    required this.controller,
     required this.selectedSection,
+    required this.onOpenConnections,
     required this.onSectionSelected,
-    required this.body,
   });
 
+  final CompanionController controller;
   final int selectedSection;
+  final VoidCallback onOpenConnections;
   final ValueChanged<int> onSectionSelected;
-  final Widget body;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFF162220)),
+      child: SizedBox(
+        width: 280,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 24, 18, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'OpenClaw',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Companion',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: const Color(0xFFB2C1BB),
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                controller.connectedGatewayTitle ?? 'Operator workspace',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF96AAA3),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ..._CompanionHomeSections.sections.indexed.map((entry) {
+                final index = entry.$1;
+                final item = entry.$2;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _DesktopSectionButton(
+                    item: item,
+                    selected: index == selectedSection,
+                    onPressed: () => onSectionSelected(index),
+                  ),
+                );
+              }),
+              const Spacer(),
+              _SidebarStatus(controller: controller),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonal(
+                  onPressed: onOpenConnections,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF253531),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: Text(
+                    controller.connected ? 'Connections' : 'Connect gateway',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopSectionButton extends StatelessWidget {
+  const _DesktopSectionButton({
+    required this.item,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final _SectionItem item;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = selected ? Colors.white : const Color(0xFF92A59E);
+    return Material(
+      color: selected ? const Color(0xFF253531) : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                selected ? item.selectedIcon : item.icon,
+                size: 20,
+                color: textColor,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                item.label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: textColor,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactNavBar extends StatelessWidget {
+  const _CompactNavBar({
+    required this.selectedIndex,
+    required this.items,
+    required this.onSelected,
+  });
+
+  final int selectedIndex;
+  final List<_SectionItem> items;
+  final ValueChanged<int> onSelected;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FBF8),
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: const Color(0xFFD9E3DD)),
-      ),
-      child: Row(
-        children: <Widget>[
-          SizedBox(
-            width: 108,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28),
-              child: NavigationRail(
-                selectedIndex: selectedSection,
-                onDestinationSelected: onSectionSelected,
-                labelType: NavigationRailLabelType.all,
-                destinations: _CompanionHomeSections.sections
-                    .map(
-                      (item) => NavigationRailDestination(
-                        icon: Icon(item.icon),
-                        selectedIcon: Icon(item.selectedIcon),
-                        label: Text(item.label),
-                      ),
-                    )
-                    .toList(growable: false),
-              ),
-            ),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: body,
-            ),
+        color: const Color(0xFF162220),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x1A000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
           ),
         ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          children: items.indexed
+              .map((entry) {
+                final index = entry.$1;
+                final item = entry.$2;
+                final selected = index == selectedIndex;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Material(
+                      color: selected
+                          ? const Color(0xFF253531)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => onSelected(index),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 10,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(
+                                selected ? item.selectedIcon : item.icon,
+                                color: selected
+                                    ? Colors.white
+                                    : const Color(0xFF92A59E),
+                                size: 20,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                item.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: selected
+                                          ? Colors.white
+                                          : const Color(0xFF92A59E),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              })
+              .toList(growable: false),
+        ),
       ),
     );
   }
@@ -395,10 +670,18 @@ class _DesktopShell extends StatelessWidget {
 
 class _CompanionHomeSections {
   static const List<_SectionItem> sections = <_SectionItem>[
-    _SectionItem('Overview', Icons.dashboard_outlined, Icons.dashboard),
-    _SectionItem('Sessions', Icons.forum_outlined, Icons.forum),
-    _SectionItem('Explore', Icons.travel_explore_outlined, Icons.travel_explore),
-    _SectionItem('Events', Icons.bolt_outlined, Icons.bolt),
+    _SectionItem('Home', Icons.grid_view_outlined, Icons.grid_view_rounded),
+    _SectionItem('Chat', Icons.forum_outlined, Icons.forum_rounded),
+    _SectionItem(
+      'Inspect',
+      Icons.travel_explore_outlined,
+      Icons.travel_explore_rounded,
+    ),
+    _SectionItem(
+      'Logs',
+      Icons.receipt_long_outlined,
+      Icons.receipt_long_rounded,
+    ),
   ];
 }
 
@@ -409,6 +692,8 @@ class _CompanionBody extends StatelessWidget {
     required this.sessionController,
     required this.promptController,
     required this.thinking,
+    required this.onOpenConnections,
+    required this.onRefresh,
     required this.onThinkingChanged,
     required this.onSessionChanged,
     required this.onSessionSelected,
@@ -422,6 +707,8 @@ class _CompanionBody extends StatelessWidget {
   final TextEditingController sessionController;
   final TextEditingController promptController;
   final String thinking;
+  final VoidCallback onOpenConnections;
+  final VoidCallback onRefresh;
   final ValueChanged<String> onThinkingChanged;
   final ValueChanged<String> onSessionChanged;
   final ValueChanged<String> onSessionSelected;
@@ -431,38 +718,130 @@ class _CompanionBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = _CompanionHomeSections.sections[selectedSection].label;
+    final page = _CompanionHomeSections.sections[selectedSection];
+    final subtitle = switch (selectedSection) {
+      0 => 'Gateway status, session volume, and recent activity.',
+      1 => 'Stay in one session, review history, and send prompts quickly.',
+      2 => 'Inspect channels, models, tools, and paired nodes.',
+      _ => 'Watch live gateway events and the local activity log.',
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _PageHeader(
-          title: title,
-          subtitle: controller.connectedGatewayTitle == null
-              ? 'Operator-side gateway companion'
-              : '${controller.connectedGatewayTitle} · ${controller.connectionState.phase.name}',
+          title: page.label,
+          subtitle: subtitle,
+          gatewayLabel: controller.connectedGatewayTitle,
+          connectionState: controller.connectionState,
           errorText: controller.errorText,
+          onOpenConnections: onOpenConnections,
+          onRefresh: onRefresh,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Expanded(
-          child: switch (selectedSection) {
-            0 => _OverviewPage(controller: controller),
-            1 => _SessionsPage(
-                controller: controller,
-                sessionController: sessionController,
-                promptController: promptController,
-                thinking: thinking,
-                onThinkingChanged: onThinkingChanged,
-                onSessionChanged: onSessionChanged,
-                onSessionSelected: onSessionSelected,
-                onReloadHistory: onReloadHistory,
-                onSendPrompt: onSendPrompt,
-                onAbortRun: onAbortRun,
-              ),
-            2 => _ExplorePage(controller: controller),
-            _ => _EventsPage(controller: controller),
-          },
+          child: controller.needsInitialConnectionSetup
+              ? _FirstRunPrompt(
+                  discoveredGateways: controller.discoveredGateways,
+                  onOpenConnections: onOpenConnections,
+                )
+              : switch (selectedSection) {
+                  0 => _OverviewPage(controller: controller),
+                  1 => _SessionsPage(
+                    controller: controller,
+                    sessionController: sessionController,
+                    promptController: promptController,
+                    thinking: thinking,
+                    onThinkingChanged: onThinkingChanged,
+                    onSessionChanged: onSessionChanged,
+                    onSessionSelected: onSessionSelected,
+                    onReloadHistory: onReloadHistory,
+                    onSendPrompt: onSendPrompt,
+                    onAbortRun: onAbortRun,
+                  ),
+                  2 => _ExplorePage(controller: controller),
+                  _ => _EventsPage(controller: controller),
+                },
         ),
       ],
+    );
+  }
+}
+
+class _FirstRunPrompt extends StatelessWidget {
+  const _FirstRunPrompt({
+    required this.discoveredGateways,
+    required this.onOpenConnections,
+  });
+
+  final List<GatewayDiscoveredGateway> discoveredGateways;
+  final VoidCallback onOpenConnections;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8E1D1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Icon(
+                      Icons.router_rounded,
+                      size: 28,
+                      color: Color(0xFF7A5C38),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Connect to a gateway first',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  discoveredGateways.isEmpty
+                      ? 'Import a setup code or enter a gateway URL to start using the companion app.'
+                      : 'A local gateway was discovered. Open Connections to use it, or enter a manual URL.',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: const Color(0xFF4A665F),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      onPressed: onOpenConnections,
+                      icon: const Icon(Icons.tune_rounded),
+                      label: const Text('Open Connections'),
+                    ),
+                    if (discoveredGateways.isNotEmpty)
+                      _HeaderPill(
+                        icon: Icons.wifi_tethering_rounded,
+                        label:
+                            '${discoveredGateways.length} local gateway${discoveredGateways.length == 1 ? '' : 's'} found',
+                        tint: const Color(0xFFE6EBE3),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -475,6 +854,7 @@ class _ConnectionPanel extends StatelessWidget {
     required this.tokenController,
     required this.passwordController,
     required this.authMode,
+    required this.embedded,
     required this.autoConnect,
     required this.onAuthModeChanged,
     required this.onAutoConnectChanged,
@@ -484,6 +864,7 @@ class _ConnectionPanel extends StatelessWidget {
     required this.onDisconnect,
     required this.onForgetTrust,
     required this.onClearSavedCredentials,
+    required this.onResetAllDebug,
   });
 
   final CompanionController controller;
@@ -492,6 +873,7 @@ class _ConnectionPanel extends StatelessWidget {
   final TextEditingController tokenController;
   final TextEditingController passwordController;
   final CompanionAuthMode authMode;
+  final bool embedded;
   final bool autoConnect;
   final ValueChanged<CompanionAuthMode> onAuthModeChanged;
   final ValueChanged<bool> onAutoConnectChanged;
@@ -501,215 +883,419 @@ class _ConnectionPanel extends StatelessWidget {
   final VoidCallback onDisconnect;
   final VoidCallback onForgetTrust;
   final VoidCallback onClearSavedCredentials;
+  final Future<void> Function() onResetAllDebug;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FBF8),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFD9E3DD)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Connection',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _StatusChip(controller: controller),
-              const SizedBox(height: 18),
-              Text(
-                'Setup code',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: setupCodeController,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  hintText: 'Paste JSON or base64 setup code',
-                ),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.tonal(
-                onPressed: controller.busy
-                    ? null
-                    : () {
-                        unawaited(onImportSetupCode());
-                      },
-                child: const Text('Import setup code'),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Manual endpoint',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: urlController,
-                decoration: const InputDecoration(
-                  hintText: 'wss://gateway.example:8443 or ws://127.0.0.1:18789',
-                ),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<CompanionAuthMode>(
-                segments: CompanionAuthMode.values
-                    .map(
-                      (mode) => ButtonSegment<CompanionAuthMode>(
-                        value: mode,
-                        label: Text(mode.label),
-                      ),
-                    )
-                    .toList(growable: false),
-                selected: <CompanionAuthMode>{authMode},
-                onSelectionChanged: (value) {
-                  onAuthModeChanged(value.first);
-                },
-              ),
-              const SizedBox(height: 12),
-              if (authMode == CompanionAuthMode.token)
-                TextField(
-                  controller: tokenController,
-                  decoration: const InputDecoration(
-                    hintText: 'Shared gateway token',
-                  ),
-                ),
-              if (authMode == CompanionAuthMode.password)
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Gateway password',
-                  ),
-                ),
-              const SizedBox(height: 12),
-              SwitchListTile.adaptive(
-                value: autoConnect,
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Reconnect on launch'),
-                subtitle: const Text('Reuse the last manual or discovered target'),
-                onChanged: onAutoConnectChanged,
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: controller.busy
-                          ? null
-                          : () {
-                              unawaited(onConnectManual());
-                            },
-                      child: const Text('Connect'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: controller.client == null ? null : onDisconnect,
-                      child: const Text('Disconnect'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'Discovered gateways',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (controller.discoveredGateways.isEmpty)
-                _HintCard(
-                  text: 'No gateways found on the local network yet.',
-                )
-              else
-                Column(
-                  children: controller.discoveredGateways
-                      .map(
-                        (gateway) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _DiscoveredGatewayTile(
-                            gateway: gateway,
-                            busy: controller.busy,
-                            onConnect: () => onConnectDiscovered(gateway),
-                          ),
+    final visibleAuthMode = authMode == CompanionAuthMode.none
+        ? CompanionAuthMode.token
+        : authMode;
+    final visibleAuthModes = CompanionAuthMode.values
+        .where((mode) => mode != CompanionAuthMode.none)
+        .toList(growable: false);
+
+    final panel = Column(
+      children: <Widget>[
+        DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0xFFD8D1C5))),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Gateway access',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
                         ),
-                      )
-                      .toList(growable: false),
-                ),
-              const SizedBox(height: 22),
-              Text(
-                'Maintenance',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: onForgetTrust,
-                      child: const Text('Forget trust'),
-                    ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Import, discover, or connect manually. Saved auth and TLS trust are reused automatically.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5E706B),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: onClearSavedCredentials,
-                      child: const Text('Clear auth'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(width: 12),
+                _StatusChip(state: controller.connectionState),
+              ],
+            ),
           ),
         ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _SheetSection(
+                  title: 'Quick start',
+                  subtitle: 'Paste a setup code or pick a local gateway.',
+                  child: Column(
+                    children: <Widget>[
+                      TextField(
+                        controller: setupCodeController,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          hintText: 'Paste JSON or base64 setup code',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonal(
+                          onPressed: controller.busy
+                              ? null
+                              : () {
+                                  unawaited(onImportSetupCode());
+                                },
+                          child: const Text('Import setup code'),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      if (controller.discoveredGateways.isEmpty)
+                        _HintCard(
+                          text: 'No gateways found on the local network yet.',
+                        )
+                      else
+                        Column(
+                          children: controller.discoveredGateways
+                              .map(
+                                (gateway) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _DiscoveredGatewayTile(
+                                    gateway: gateway,
+                                    busy: controller.busy,
+                                    onConnect: () =>
+                                        onConnectDiscovered(gateway),
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SheetSection(
+                  title: 'Manual connection',
+                  subtitle:
+                      'Use a direct gateway URL for local, remote, or tunneled setups.',
+                  child: Column(
+                    children: <Widget>[
+                      TextField(
+                        controller: urlController,
+                        decoration: const InputDecoration(
+                          hintText:
+                              'wss://gateway.example:8443 or ws://127.0.0.1:18789',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<CompanionAuthMode>(
+                        segments: visibleAuthModes
+                            .map(
+                              (mode) => ButtonSegment<CompanionAuthMode>(
+                                value: mode,
+                                label: Text(mode.label),
+                              ),
+                            )
+                            .toList(growable: false),
+                        selected: <CompanionAuthMode>{visibleAuthMode},
+                        onSelectionChanged: (value) {
+                          onAuthModeChanged(value.first);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      if (visibleAuthMode == CompanionAuthMode.token)
+                        TextField(
+                          controller: tokenController,
+                          decoration: const InputDecoration(
+                            hintText: 'Shared gateway token',
+                          ),
+                        ),
+                      if (visibleAuthMode == CompanionAuthMode.password)
+                        TextField(
+                          controller: passwordController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            hintText: 'Gateway password',
+                          ),
+                        ),
+                      const SizedBox(height: 8),
+                      SwitchListTile.adaptive(
+                        value: autoConnect,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Reconnect on launch'),
+                        subtitle: const Text(
+                          'Reuse the last manual or discovered target',
+                        ),
+                        onChanged: onAutoConnectChanged,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SheetSection(
+                  title: 'Maintenance',
+                  subtitle: 'Clear saved trust or credentials when re-testing.',
+                  child: Column(
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: onForgetTrust,
+                              child: const Text('Forget trust'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: onClearSavedCredentials,
+                              child: const Text('Clear auth'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (kDebugMode) ...<Widget>[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: controller.busy
+                                ? null
+                                : () {
+                                    unawaited(onResetAllDebug());
+                                  },
+                            icon: const Icon(Icons.restart_alt_rounded),
+                            label: const Text('Reset app state'),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Color(0xFFD8D1C5))),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: FilledButton(
+                    onPressed: controller.busy
+                        ? null
+                        : () {
+                            unawaited(onConnectManual());
+                          },
+                    child: const Text('Connect'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: controller.client == null ? null : onDisconnect,
+                    child: const Text('Disconnect'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (embedded) {
+      return panel;
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8F5),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD9E3DD)),
       ),
+      child: panel,
     );
   }
 }
 
 class _OverviewPage extends StatelessWidget {
-  const _OverviewPage({
-    required this.controller,
-  });
+  const _OverviewPage({required this.controller});
 
   final CompanionController controller;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: <Widget>[
-        Wrap(
+    final sessionItems =
+        controller.sessionsList?.sessions ?? const <GatewaySessionRow>[];
+    final featuredSessions = sessionItems.take(5).toList(growable: false);
+
+    final healthCard = _InfoCard(
+      title: 'Health snapshot',
+      child: controller.health == null
+          ? const _EmptyState('Connect and refresh to load gateway health.')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _InfoLine('Healthy', controller.health!.ok ? 'Yes' : 'No'),
+                _InfoLine(
+                  'Default agent',
+                  controller.health!.defaultAgentId ?? '—',
+                ),
+                _InfoLine(
+                  'Heartbeat',
+                  controller.health!.heartbeatSeconds?.toString() ?? '—',
+                ),
+                const SizedBox(height: 12),
+                ...controller.health!.channelOrder.take(6).map((id) {
+                  final channel = controller.health!.channels[id];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '${controller.health!.channelLabels[id] ?? id}: ${channel ?? 'unknown'}',
+                    ),
+                  );
+                }),
+              ],
+            ),
+    );
+
+    final runtimeCard = _InfoCard(
+      title: 'Runtime',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _InfoLine(
+            'Connection',
+            controller.connected ? 'Operator session active' : 'Offline',
+          ),
+          _InfoLine(
+            'Voice wake',
+            (controller.voiceWake?.triggers.isNotEmpty ?? false)
+                ? 'Enabled'
+                : 'Off',
+          ),
+          _InfoLine(
+            'Cron',
+            controller.cronStatus?.enabled == true
+                ? '${controller.cronStatus?.jobs ?? 0} jobs'
+                : 'Off',
+          ),
+          _InfoLine('Models', '${controller.models?.models.length ?? 0}'),
+          _InfoLine('Tools', '${controller.tools?.groups.length ?? 0} groups'),
+          _InfoLine('Nodes', '${controller.nodes.length}'),
+        ],
+      ),
+    );
+
+    final sessionsCard = _InfoCard(
+      title: 'Session snapshot',
+      child: featuredSessions.isEmpty
+          ? const _EmptyState('No sessions loaded yet.')
+          : Column(
+              children: featuredSessions
+                  .map(
+                    (session) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  session.displayName ??
+                                      session.derivedTitle ??
+                                      session.label ??
+                                      session.key,
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  session.lastMessagePreview ?? session.kind,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (session.key ==
+                              controller.config.preferredSessionKey)
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Color(0xFF7A5C38),
+                            ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    final activityCard = _InfoCard(
+      title: 'Recent activity',
+      child: controller.activityLog.isEmpty
+          ? const _EmptyState('No local activity yet.')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: controller.activityLog
+                  .take(6)
+                  .map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        line,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 1100;
+        final metricStrip = Wrap(
           spacing: 16,
           runSpacing: 16,
           children: <Widget>[
             _MetricCard(
               title: 'Gateway',
               value: controller.serverVersion ?? 'Disconnected',
-              subtitle: controller.connectedGatewayTitle ?? 'No active endpoint',
+              subtitle:
+                  controller.connectedGatewayTitle ?? 'No active endpoint',
             ),
             _MetricCard(
-              title: 'Auth state',
+              title: 'Role',
               value: controller.client?.hello.auth?.role ?? 'offline',
-              subtitle: controller.client?.hello.auth?.scopes.join(', ') ??
-                  'No granted scopes yet',
+              subtitle:
+                  controller.client?.hello.auth?.scopes.join(', ') ??
+                  'No granted scopes',
             ),
             _MetricCard(
               title: 'Sessions',
@@ -719,89 +1305,58 @@ class _OverviewPage extends StatelessWidget {
             _MetricCard(
               title: 'Nodes',
               value: '${controller.nodes.length}',
-              subtitle: controller.nodes.isEmpty ? 'No paired nodes' : 'Paired nodes available',
+              subtitle: controller.nodes.isEmpty
+                  ? 'No paired nodes'
+                  : 'Paired nodes available',
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
+        );
+
+        if (!wide) {
+          return ListView(
+            children: <Widget>[
+              metricStrip,
+              const SizedBox(height: 16),
+              healthCard,
+              const SizedBox(height: 16),
+              runtimeCard,
+              const SizedBox(height: 16),
+              sessionsCard,
+              const SizedBox(height: 16),
+              activityCard,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            SizedBox(
-              width: 420,
-              child: _InfoCard(
-                title: 'Health',
-                child: controller.health == null
-                    ? const _EmptyState('Connect and refresh to load health.')
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          _InfoLine('OK', controller.health!.ok ? 'yes' : 'no'),
-                          _InfoLine('Default agent', controller.health!.defaultAgentId ?? '—'),
-                          _InfoLine(
-                            'Heartbeat',
-                            controller.health!.heartbeatSeconds?.toString() ?? '—',
-                          ),
-                          const SizedBox(height: 10),
-                          ...controller.health!.channelOrder.map((id) {
-                            final channel = controller.health!.channels[id];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Text(
-                                '${controller.health!.channelLabels[id] ?? id}: ${channel ?? 'unknown'}',
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
+            Expanded(
+              flex: 6,
+              child: ListView(
+                children: <Widget>[
+                  metricStrip,
+                  const SizedBox(height: 16),
+                  healthCard,
+                  const SizedBox(height: 16),
+                  runtimeCard,
+                ],
               ),
             ),
-            SizedBox(
-              width: 420,
-              child: _InfoCard(
-                title: 'Usage and cron',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    _InfoLine(
-                      'Usage providers',
-                      controller.usage == null
-                          ? '—'
-                          : '${controller.usage!.providers.length}',
-                    ),
-                    _InfoLine(
-                      'Models tracked',
-                      '${controller.models?.models.length ?? 0}',
-                    ),
-                    _InfoLine(
-                      'Cron enabled',
-                      controller.cronStatus?.enabled == true ? 'yes' : 'no',
-                    ),
-                    _InfoLine('Cron jobs', '${controller.cronStatus?.jobs ?? 0}'),
-                    _InfoLine(
-                      'Voice wake triggers',
-                      controller.voiceWake?.triggers.join(', ') ?? '—',
-                    ),
-                  ],
-                ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 5,
+              child: ListView(
+                children: <Widget>[
+                  sessionsCard,
+                  const SizedBox(height: 16),
+                  activityCard,
+                ],
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        _InfoCard(
-          title: 'Status snapshot',
-          child: controller.status == null
-              ? const _EmptyState('No status snapshot loaded yet.')
-              : SelectableText(
-                  const JsonEncoder.withIndent('  ').convert(controller.status!.raw),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
-                      ),
-                ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -835,156 +1390,223 @@ class _SessionsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 1000;
+        final wide = constraints.maxWidth >= 1040;
+        final sessions =
+            controller.sessionsList?.sessions ?? const <GatewaySessionRow>[];
+
         final sessionList = _InfoCard(
-          title: 'Sessions',
-          child: controller.sessionsList == null
+          title: 'Conversations',
+          child: sessions.isEmpty
               ? const _EmptyState('No session list loaded yet.')
-              : Column(
-                  children: controller.sessionsList!.sessions
-                      .map(
-                        (session) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(session.displayName ??
-                              session.derivedTitle ??
-                              session.label ??
-                              session.key),
-                          subtitle: Text(
-                            session.lastMessagePreview ?? session.kind,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: session.key == controller.config.preferredSessionKey
-                              ? const Icon(Icons.check_circle, color: Color(0xFF16423C))
-                              : null,
-                          onTap: () => onSessionSelected(session.key),
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: sessions.length,
+                  separatorBuilder: (_, _) => const Divider(height: 14),
+                  itemBuilder: (context, index) {
+                    final session = sessions[index];
+                    final selected =
+                        session.key == controller.config.preferredSessionKey;
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => onSessionSelected(session.key),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? const Color(0xFFE8E1D1)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                      )
-                      .toList(growable: false),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      session.displayName ??
+                                          session.derivedTitle ??
+                                          session.label ??
+                                          session.key,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ),
+                                  if (selected)
+                                    const Icon(
+                                      Icons.radio_button_checked_rounded,
+                                      size: 18,
+                                      color: Color(0xFF7A5C38),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                session.lastMessagePreview ?? session.kind,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
         );
 
-        final chatPanel = Column(
-          children: <Widget>[
-            _InfoCard(
-              title: 'Compose',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        final historyCard = _InfoCard(
+          title: 'Conversation',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: TextField(
-                          controller: sessionController,
-                          decoration: const InputDecoration(
-                            labelText: 'Session key',
-                          ),
-                          onSubmitted: onSessionChanged,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: thinking,
-                          decoration: const InputDecoration(
-                            labelText: 'Thinking',
-                          ),
-                          items: const <String>[
-                            'default',
-                            'low',
-                            'medium',
-                            'high',
-                          ]
-                              .map(
-                                (value) => DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Text(value),
-                                ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value != null) {
-                              onThinkingChanged(value);
-                            }
-                          },
-                        ),
-                      ),
-                    ],
+                  _HeaderPill(
+                    icon: Icons.forum_outlined,
+                    label: controller.config.preferredSessionKey,
+                    tint: const Color(0xFFE8E1D1),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: promptController,
-                    minLines: 4,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      hintText: 'Send a message to the selected session',
-                    ),
+                  _HeaderPill(
+                    icon: Icons.psychology_alt_outlined,
+                    label: thinking,
+                    tint: const Color(0xFFE6EBE3),
                   ),
-                  if (controller.streamingSummary != null) ...<Widget>[
-                    const SizedBox(height: 12),
-                    _HintCard(text: controller.streamingSummary!),
-                  ],
-                  const SizedBox(height: 12),
-                  Row(
-                    children: <Widget>[
-                      FilledButton(
-                        onPressed: controller.busy
-                            ? null
-                            : () {
-                                unawaited(onSendPrompt());
-                              },
-                        child: const Text('Send'),
-                      ),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed:
-                            controller.activeRunId == null ? null : onAbortRun,
-                        child: const Text('Abort run'),
-                      ),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: controller.busy ? null : onReloadHistory,
-                        child: const Text('Reload history'),
-                      ),
-                    ],
+                  OutlinedButton(
+                    onPressed: controller.busy ? null : onReloadHistory,
+                    child: const Text('Reload'),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.activeRunId == null
+                        ? null
+                        : onAbortRun,
+                    child: const Text('Abort run'),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _InfoCard(
-                title: 'History',
+              if (controller.streamingSummary != null) ...<Widget>[
+                const SizedBox(height: 14),
+                _HintCard(text: controller.streamingSummary!),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                height: wide ? constraints.maxHeight - 290 : 360,
                 child: controller.history.isEmpty
                     ? const _EmptyState('No chat history loaded yet.')
                     : ListView.separated(
                         itemCount: controller.history.length,
-                        separatorBuilder: (_, _) => const Divider(height: 18),
+                        separatorBuilder: (_, _) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          final message = controller.history[index];
-                          return _HistoryTile(message: message);
+                          return _ChatBubble(
+                            message: controller.history[index],
+                          );
                         },
                       ),
               ),
-            ),
-          ],
+            ],
+          ),
+        );
+
+        final composerCard = _InfoCard(
+          title: 'Compose',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: sessionController,
+                      decoration: const InputDecoration(
+                        labelText: 'Session key',
+                      ),
+                      onSubmitted: onSessionChanged,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 180,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: thinking,
+                      decoration: const InputDecoration(labelText: 'Thinking'),
+                      items: const <String>['default', 'low', 'medium', 'high']
+                          .map(
+                            (value) => DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (value) {
+                        if (value != null) {
+                          onThinkingChanged(value);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: promptController,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  hintText: 'Send a message to the selected session',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: controller.busy
+                    ? null
+                    : () {
+                        unawaited(onSendPrompt());
+                      },
+                child: const Text('Send prompt'),
+              ),
+            ],
+          ),
         );
 
         if (!wide) {
           return ListView(
             children: <Widget>[
-              SizedBox(height: 340, child: sessionList),
+              sessionList,
               const SizedBox(height: 16),
-              SizedBox(height: 760, child: chatPanel),
+              historyCard,
+              const SizedBox(height: 16),
+              composerCard,
             ],
           );
         }
 
         return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            SizedBox(width: 320, child: sessionList),
+            SizedBox(
+              width: 320,
+              child: ListView(children: <Widget>[sessionList]),
+            ),
             const SizedBox(width: 16),
-            Expanded(child: chatPanel),
+            Expanded(
+              child: Column(
+                children: <Widget>[
+                  Expanded(child: ListView(children: <Widget>[historyCard])),
+                  const SizedBox(height: 16),
+                  composerCard,
+                ],
+              ),
+            ),
           ],
         );
       },
@@ -993,129 +1615,165 @@ class _SessionsPage extends StatelessWidget {
 }
 
 class _ExplorePage extends StatelessWidget {
-  const _ExplorePage({
-    required this.controller,
-  });
+  const _ExplorePage({required this.controller});
 
   final CompanionController controller;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: <Widget>[
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: <Widget>[
-            SizedBox(
-              width: 420,
-              child: _InfoCard(
-                title: 'Channels',
-                child: controller.channelsStatus == null
-                    ? const _EmptyState('No channel snapshot yet.')
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: controller.channelsStatus!.channelOrder
-                            .map(
-                              (channelId) => Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Text(
-                                  '${controller.channelsStatus!.channelLabels[channelId] ?? channelId}: ${controller.channelsStatus!.channels[channelId] ?? 'unknown'}',
-                                ),
-                              ),
-                            )
-                            .toList(growable: false),
+    final channelsCard = _InfoCard(
+      title: 'Channels',
+      child: controller.channelsStatus == null
+          ? const _EmptyState('No channel snapshot yet.')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: controller.channelsStatus!.channelOrder
+                  .map(
+                    (channelId) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        '${controller.channelsStatus!.channelLabels[channelId] ?? channelId}: ${controller.channelsStatus!.channels[channelId] ?? 'unknown'}',
                       ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    final nodesCard = _InfoCard(
+      title: 'Nodes',
+      child: controller.nodes.isEmpty
+          ? const _EmptyState('No paired nodes reported.')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: controller.nodes
+                  .map(
+                    (node) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              node.displayName ?? node.nodeId,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          _HeaderPill(
+                            icon: node.connected
+                                ? Icons.link_rounded
+                                : Icons.link_off_rounded,
+                            label: node.connected ? 'Connected' : 'Offline',
+                            tint: node.connected
+                                ? const Color(0xFFE6EBE3)
+                                : const Color(0xFFE9E7E4),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    final modelsCard = _InfoCard(
+      title: 'Models',
+      child: controller.models == null
+          ? const _EmptyState('No model catalog loaded.')
+          : Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: controller.models!.models
+                  .map(
+                    (model) =>
+                        Chip(label: Text('${model.provider} · ${model.name}')),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    final toolsCard = _InfoCard(
+      title: 'Tools',
+      child: controller.tools == null
+          ? const _EmptyState('No tool catalog loaded.')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: controller.tools!.groups
+                  .map(
+                    (group) => Padding(
+                      padding: const EdgeInsets.only(bottom: 18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            group.label,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: group.tools
+                                .map((tool) => Chip(label: Text(tool.label)))
+                                .toList(growable: false),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 980;
+        if (!wide) {
+          return ListView(
+            children: <Widget>[
+              channelsCard,
+              const SizedBox(height: 16),
+              nodesCard,
+              const SizedBox(height: 16),
+              modelsCard,
+              const SizedBox(height: 16),
+              toolsCard,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: ListView(
+                children: <Widget>[
+                  channelsCard,
+                  const SizedBox(height: 16),
+                  modelsCard,
+                ],
               ),
             ),
-            SizedBox(
-              width: 420,
-              child: _InfoCard(
-                title: 'Nodes',
-                child: controller.nodes.isEmpty
-                    ? const _EmptyState('No paired nodes reported.')
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: controller.nodes
-                            .map(
-                              (node) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Text(
-                                  '${node.displayName ?? node.nodeId} · ${node.connected ? 'connected' : 'offline'}',
-                                ),
-                              ),
-                            )
-                            .toList(growable: false),
-                      ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ListView(
+                children: <Widget>[
+                  nodesCard,
+                  const SizedBox(height: 16),
+                  toolsCard,
+                ],
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        _InfoCard(
-          title: 'Models',
-          child: controller.models == null
-              ? const _EmptyState('No model catalog loaded.')
-              : Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: controller.models!.models
-                      .map(
-                        (model) => Chip(
-                          label: Text('${model.provider} · ${model.name}'),
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-        ),
-        const SizedBox(height: 16),
-        _InfoCard(
-          title: 'Tools',
-          child: controller.tools == null
-              ? const _EmptyState('No tool catalog loaded.')
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: controller.tools!.groups
-                      .map(
-                        (group) => Padding(
-                          padding: const EdgeInsets.only(bottom: 18),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                group.label,
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: group.tools
-                                    .map(
-                                      (tool) => Chip(
-                                        label: Text(tool.label),
-                                      ),
-                                    )
-                                    .toList(growable: false),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
 
 class _EventsPage extends StatelessWidget {
-  const _EventsPage({
-    required this.controller,
-  });
+  const _EventsPage({required this.controller});
 
   final CompanionController controller;
 
@@ -1124,7 +1782,7 @@ class _EventsPage extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 960;
-        final eventFeed = _InfoCard(
+        final eventFeed = _ConsoleCard(
           title: 'Gateway events',
           child: controller.eventLines.isEmpty
               ? const _EmptyState('No events yet.')
@@ -1136,10 +1794,7 @@ class _EventsPage extends StatelessWidget {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(
-                          '${line.timeLabel} · ${line.name}',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
+                        Text('${line.timeLabel} · ${line.name}'),
                         const SizedBox(height: 4),
                         Text(line.summary),
                       ],
@@ -1148,7 +1803,7 @@ class _EventsPage extends StatelessWidget {
                 ),
         );
 
-        final activityFeed = _InfoCard(
+        final activityFeed = _ConsoleCard(
           title: 'Activity log',
           child: controller.activityLog.isEmpty
               ? const _EmptyState('No activity yet.')
@@ -1160,8 +1815,8 @@ class _EventsPage extends StatelessWidget {
                       child: SelectableText(
                         controller.activityLog[index],
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontFamily: 'monospace',
-                            ),
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     );
                   },
@@ -1194,60 +1849,157 @@ class _PageHeader extends StatelessWidget {
   const _PageHeader({
     required this.title,
     required this.subtitle,
+    required this.connectionState,
+    required this.onOpenConnections,
+    required this.onRefresh,
+    this.gatewayLabel,
     this.errorText,
   });
 
   final String title;
   final String subtitle;
+  final GatewayConnectionState connectionState;
+  final VoidCallback onOpenConnections;
+  final VoidCallback onRefresh;
+  final String? gatewayLabel;
   final String? errorText;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          title,
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        final actions = Wrap(
+          alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+          spacing: 10,
+          runSpacing: 10,
+          children: <Widget>[
+            if (gatewayLabel != null && gatewayLabel!.isNotEmpty)
+              _HeaderPill(
+                icon: Icons.hub_outlined,
+                label: gatewayLabel!,
+                tint: const Color(0xFFE6EBE3),
               ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: const Color(0xFF4A665F),
+            _StatusChip(state: connectionState),
+            OutlinedButton.icon(
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Refresh'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: onOpenConnections,
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Connections'),
+            ),
+          ],
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            if (compact) ...<Widget>[
+              Text(
+                title,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: const Color(0xFF4A665F)),
+              ),
+              const SizedBox(height: 14),
+              actions,
+            ] else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.headlineMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(color: const Color(0xFF4A665F)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: actions,
+                  ),
+                ],
+              ),
+            if (errorText != null) ...<Widget>[
+              const SizedBox(height: 12),
+              _HintCard(text: errorText!, tint: const Color(0xFFFFE4E1)),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _HeaderPill extends StatelessWidget {
+  const _HeaderPill({
+    required this.icon,
+    required this.label,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tint,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: 16, color: const Color(0xFF30453F)),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: const Color(0xFF30453F),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
-        if (errorText != null) ...<Widget>[
-          const SizedBox(height: 12),
-          _HintCard(
-            text: errorText!,
-            tint: const Color(0xFFFFE4E1),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.controller,
-  });
+  const _StatusChip({required this.state});
 
-  final CompanionController controller;
+  final GatewayConnectionState state;
 
   @override
   Widget build(BuildContext context) {
-    final phase = controller.connectionState.phase;
-    final color = switch (phase) {
-      GatewayConnectionPhase.connected => const Color(0xFF17594E),
-      GatewayConnectionPhase.connecting => const Color(0xFF9A6700),
-      GatewayConnectionPhase.reconnecting => const Color(0xFF9A6700),
-      GatewayConnectionPhase.closed => const Color(0xFFB42318),
-      GatewayConnectionPhase.disconnected => const Color(0xFF667A74),
-    };
+    final color = _phaseColor(state.phase);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
@@ -1261,17 +2013,212 @@ class _StatusChip extends StatelessWidget {
             Icon(Icons.circle, size: 10, color: color),
             const SizedBox(width: 8),
             Text(
-              '${phase.name}${controller.serverVersion == null ? '' : ' · ${controller.serverVersion}'}',
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w700,
-              ),
+              _phaseLabel(state.phase),
+              style: TextStyle(color: color, fontWeight: FontWeight.w700),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+class _SidebarStatus extends StatelessWidget {
+  const _SidebarStatus({required this.controller});
+
+  final CompanionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = controller.connectionState.phase;
+    final color = _phaseColor(phase);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.circle, size: 10, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  _phaseLabel(phase),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              controller.serverVersion ?? 'No server snapshot yet',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF96AAA3)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConnectionsSheet extends StatelessWidget {
+  const _ConnectionsSheet({required this.desktop, required this.child});
+
+  final bool desktop;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = desktop
+        ? const BorderRadius.only(
+            topLeft: Radius.circular(28),
+            bottomLeft: Radius.circular(28),
+            topRight: Radius.circular(18),
+            bottomRight: Radius.circular(18),
+          )
+        : const BorderRadius.vertical(top: Radius.circular(28));
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F3EC),
+        borderRadius: borderRadius,
+        border: Border.all(color: const Color(0xFFD8D1C5)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x24000000),
+            blurRadius: 28,
+            offset: Offset(0, 18),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (!desktop)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8D1C5),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 12, 12),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Connections',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Configure endpoints, auth, discovery, and TLS trust.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF5E706B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetSection extends StatelessWidget {
+  const _SheetSection({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBF6),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2DBD0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF5E706B)),
+            ),
+            const SizedBox(height: 14),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Color _phaseColor(GatewayConnectionPhase phase) {
+  return switch (phase) {
+    GatewayConnectionPhase.connected => const Color(0xFF17594E),
+    GatewayConnectionPhase.connecting => const Color(0xFF9A6700),
+    GatewayConnectionPhase.reconnecting => const Color(0xFF9A6700),
+    GatewayConnectionPhase.closed => const Color(0xFFB42318),
+    GatewayConnectionPhase.disconnected => const Color(0xFF667A74),
+  };
+}
+
+String _phaseLabel(GatewayConnectionPhase phase) {
+  return switch (phase) {
+    GatewayConnectionPhase.connected => 'Connected',
+    GatewayConnectionPhase.connecting => 'Connecting',
+    GatewayConnectionPhase.reconnecting => 'Reconnecting',
+    GatewayConnectionPhase.closed => 'Closed',
+    GatewayConnectionPhase.disconnected => 'Offline',
+  };
 }
 
 class _DiscoveredGatewayTile extends StatelessWidget {
@@ -1299,8 +2246,8 @@ class _DiscoveredGatewayTile extends StatelessWidget {
                   child: Text(
                     gateway.displayName,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 Chip(label: Text(gateway.tlsEnabled ? 'TLS' : 'No TLS')),
@@ -1344,18 +2291,24 @@ class _MetricCard extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: const Color(0xFF4A665F),
-                    ),
+                  color: const Color(0xFF6B6359),
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 value,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                ),
               ),
               const SizedBox(height: 6),
-              Text(subtitle),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF4A665F),
+                ),
+              ),
             ],
           ),
         ),
@@ -1365,10 +2318,7 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _InfoCard extends StatelessWidget {
-  const _InfoCard({
-    required this.title,
-    required this.child,
-  });
+  const _InfoCard({required this.title, required this.child});
 
   final String title;
   final Widget child;
@@ -1383,9 +2333,9 @@ class _InfoCard extends StatelessWidget {
           children: <Widget>[
             Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 14),
             child,
@@ -1396,11 +2346,48 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
+class _ConsoleCard extends StatelessWidget {
+  const _ConsoleCard({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF162220),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+            DefaultTextStyle(
+              style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                color: const Color(0xFFD4E0DC),
+                fontFamily: 'monospace',
+              ),
+              child: child,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HintCard extends StatelessWidget {
-  const _HintCard({
-    required this.text,
-    this.tint = const Color(0xFFE7EEEA),
-  });
+  const _HintCard({required this.text, this.tint = const Color(0xFFE7EEEA)});
 
   final String text;
   final Color tint;
@@ -1412,10 +2399,7 @@ class _HintCard extends StatelessWidget {
         color: tint,
         borderRadius: BorderRadius.circular(18),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Text(text),
-      ),
+      child: Padding(padding: const EdgeInsets.all(14), child: Text(text)),
     );
   }
 }
@@ -1431,9 +2415,9 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Text(
         text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF4A665F),
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4A665F)),
       ),
     );
   }
@@ -1454,27 +2438,20 @@ class _InfoLine extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: const Color(0xFF4A665F),
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(color: const Color(0xFF4A665F)),
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-            ),
-          ),
+          Expanded(child: Text(value, textAlign: TextAlign.right)),
         ],
       ),
     );
   }
 }
 
-class _HistoryTile extends StatelessWidget {
-  const _HistoryTile({
-    required this.message,
-  });
+class _ChatBubble extends StatelessWidget {
+  const _ChatBubble({required this.message});
 
   final JsonMap message;
 
@@ -1482,18 +2459,41 @@ class _HistoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final role = message['role']?.toString() ?? 'message';
     final text = _extractMessageText(message);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          role,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: const Color(0xFF4A665F),
-              ),
+    final outbound = role == 'user';
+    final bubbleColor = outbound
+        ? const Color(0xFFE8E1D1)
+        : const Color(0xFFF8F4ED);
+    final borderColor = outbound
+        ? const Color(0xFFD6C7A9)
+        : const Color(0xFFE3DBCF);
+    return Align(
+      alignment: outbound ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: bubbleColor,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  role,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFF6B6359),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                SelectableText(text),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 6),
-        SelectableText(text),
-      ],
+      ),
     );
   }
 }

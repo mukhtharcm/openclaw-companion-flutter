@@ -9,16 +9,16 @@ class CompanionStoreBundle {
   const CompanionStoreBundle({
     required this.configStore,
     required this.authStateStore,
+    required this.resetAll,
   });
 
   final CompanionConfigStore configStore;
   final GatewayJsonAuthStateStore authStateStore;
+  final Future<void> Function() resetAll;
 }
 
 class CompanionConfigStore {
-  CompanionConfigStore._({
-    required File file,
-  }) : _file = file;
+  CompanionConfigStore._({required File file}) : _file = file;
 
   final File _file;
 
@@ -26,17 +26,21 @@ class CompanionConfigStore {
     final directory = await getApplicationSupportDirectory();
     await directory.create(recursive: true);
     final separator = Platform.pathSeparator;
+    final authFile = File(
+      '${directory.path}${separator}gateway_auth_state.json',
+    );
     final configStore = CompanionConfigStore._(
       file: File('${directory.path}${separator}companion_config.json'),
     );
-    final authStateStore = GatewayJsonAuthStateStore(
-      store: _FileStringStore(
-        File('${directory.path}${separator}gateway_auth_state.json'),
-      ),
-    );
+    final stringStore = _FileStringStore(authFile);
+    final authStateStore = GatewayJsonAuthStateStore(store: stringStore);
     return CompanionStoreBundle(
       configStore: configStore,
       authStateStore: authStateStore,
+      resetAll: () async {
+        await configStore.delete();
+        await stringStore.deleteString(authStateStore.key);
+      },
     );
   }
 
@@ -51,7 +55,9 @@ class CompanionConfigStore {
     }
 
     final decoded = jsonDecode(raw);
-    return CompanionConfig.fromJson(_asJsonMap(decoded, 'CompanionConfigStore'));
+    return CompanionConfig.fromJson(
+      _asJsonMap(decoded, 'CompanionConfigStore'),
+    );
   }
 
   Future<void> save(CompanionConfig config) async {
@@ -99,9 +105,7 @@ class _FileStringStore implements GatewayStringStore {
 
 JsonMap _asJsonMap(Object? value, String context) {
   if (value is Map<Object?, Object?>) {
-    return value.map(
-      (key, entry) => MapEntry(key.toString(), entry),
-    );
+    return value.map((key, entry) => MapEntry(key.toString(), entry));
   }
   throw FormatException('Expected object for $context.');
 }

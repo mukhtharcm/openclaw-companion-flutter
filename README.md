@@ -6,7 +6,7 @@ Current scope:
 
 - operator-side gateway session only
 - persisted manual endpoint + auth config
-- persisted device identity, cached device tokens, and TLS fingerprints
+- persisted shared auth and TLS fingerprints
 - local Bonjour/mDNS discovery
 - first-use TLS trust prompt for `wss://` endpoints
 - sessions list, chat history, chat send, live chat/event feed
@@ -55,3 +55,11 @@ You can connect in three ways:
 
 For `wss://` connections, the app will show a trust prompt the first time it
 sees a gateway fingerprint and then pin it for later reconnects.
+
+By default the companion connects like the SDK example app: shared token or
+password auth for an operator session. It does not use pairable device auth in
+the normal flow.
+
+In debug builds, the Connections panel also exposes a `Reset app state` action
+that clears saved config, auth, and trusted TLS fingerprints so first-run flows
+can be tested repeatedly.
