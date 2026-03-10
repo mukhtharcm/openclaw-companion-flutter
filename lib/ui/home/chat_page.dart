@@ -169,7 +169,9 @@ class _SessionsPageState extends State<_SessionsPage> {
                       ),
                       const SizedBox(height: 14),
                       Expanded(
-                        child: filtered.isEmpty
+                        child: widget.controller.busy && sessions.isEmpty
+                            ? const _SkeletonCardList(count: 4)
+                            : filtered.isEmpty
                             ? const _EmptyState(
                                 'No sessions match that search.',
                               )
@@ -280,6 +282,8 @@ class _SessionsPageState extends State<_SessionsPage> {
     required List<GatewaySessionRow> filteredSessions,
     required String query,
   }) {
+    final loadingSessions =
+        widget.controller.busy && widget.controller.sessionsList == null;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFFF8F4ED),
@@ -360,7 +364,9 @@ class _SessionsPageState extends State<_SessionsPage> {
                 ),
               ),
             Expanded(
-              child: filteredSessions.isEmpty
+              child: loadingSessions
+                  ? const _SkeletonCardList(count: 5)
+                  : filteredSessions.isEmpty
                   ? const Align(
                       alignment: Alignment.topLeft,
                       child: _EmptyState(

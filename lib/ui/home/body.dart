@@ -55,6 +55,12 @@ class _CompanionBody extends StatelessWidget {
       2 => 'Inspect channels, models, tools, and paired nodes.',
       _ => 'Watch live gateway events and the local activity log.',
     };
+    final loadingLabel = switch (controller.connectionState.phase) {
+      GatewayConnectionPhase.connecting => 'Connecting to the gateway',
+      GatewayConnectionPhase.reconnecting => 'Reconnecting to the gateway',
+      _ when controller.busy => 'Refreshing gateway data',
+      _ => null,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -77,6 +83,14 @@ class _CompanionBody extends StatelessWidget {
             onOpenConnections: onOpenConnections,
           ),
           const SizedBox(height: 10),
+        ],
+        if (!controller.needsInitialConnectionSetup &&
+            loadingLabel != null) ...<Widget>[
+          _LoadingBanner(
+            label: loadingLabel,
+            detail: controller.connectedGatewayTitle,
+          ),
+          const SizedBox(height: 12),
         ],
         Expanded(
           child: controller.needsInitialConnectionSetup
@@ -200,10 +214,27 @@ class _OverviewPage extends StatelessWidget {
         controller.sessionsList?.sessions ?? const <GatewaySessionRow>[];
     final featuredSessions = sessionItems.take(5).toList(growable: false);
     final health = controller.health;
+    final loadingOverview = controller.busy && health == null;
+    final loadingRuntime = controller.busy && controller.status == null;
+    final loadingSessions = controller.busy && controller.sessionsList == null;
+    final loadingActivity = controller.busy && controller.activityLog.isEmpty;
 
     final healthCard = _InfoCard(
       title: 'Health snapshot',
-      child: health == null
+      child: loadingOverview
+          ? const Column(
+              children: <Widget>[
+                _SkeletonMetricStrip(count: 4),
+                SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _SkeletonBox(height: 12, width: 96),
+                ),
+                SizedBox(height: 10),
+                _SkeletonChipWrap(count: 6),
+              ],
+            )
+          : health == null
           ? const _EmptyState('Connect and refresh to load gateway health.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,35 +302,42 @@ class _OverviewPage extends StatelessWidget {
 
     final runtimeCard = _InfoCard(
       title: 'Runtime',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _InfoLine(
-            'Connection',
-            controller.connected ? 'Operator session active' : 'Offline',
-          ),
-          _InfoLine(
-            'Voice wake',
-            (controller.voiceWake?.triggers.isNotEmpty ?? false)
-                ? 'Enabled'
-                : 'Off',
-          ),
-          _InfoLine(
-            'Cron',
-            controller.cronStatus?.enabled == true
-                ? '${controller.cronStatus?.jobs ?? 0} jobs'
-                : 'Off',
-          ),
-          _InfoLine('Models', '${controller.models?.models.length ?? 0}'),
-          _InfoLine('Tools', '${controller.tools?.groups.length ?? 0} groups'),
-          _InfoLine('Nodes', '${controller.nodes.length}'),
-        ],
-      ),
+      child: loadingRuntime
+          ? const _SkeletonInfoRows(rowCount: 6)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _InfoLine(
+                  'Connection',
+                  controller.connected ? 'Operator session active' : 'Offline',
+                ),
+                _InfoLine(
+                  'Voice wake',
+                  (controller.voiceWake?.triggers.isNotEmpty ?? false)
+                      ? 'Enabled'
+                      : 'Off',
+                ),
+                _InfoLine(
+                  'Cron',
+                  controller.cronStatus?.enabled == true
+                      ? '${controller.cronStatus?.jobs ?? 0} jobs'
+                      : 'Off',
+                ),
+                _InfoLine('Models', '${controller.models?.models.length ?? 0}'),
+                _InfoLine(
+                  'Tools',
+                  '${controller.tools?.groups.length ?? 0} groups',
+                ),
+                _InfoLine('Nodes', '${controller.nodes.length}'),
+              ],
+            ),
     );
 
     final sessionsCard = _InfoCard(
       title: 'Session snapshot',
-      child: featuredSessions.isEmpty
+      child: loadingSessions
+          ? const _SkeletonCardList(count: 4)
+          : featuredSessions.isEmpty
           ? const _EmptyState('No sessions loaded yet.')
           : Column(
               children: featuredSessions
@@ -346,7 +384,9 @@ class _OverviewPage extends StatelessWidget {
 
     final activityCard = _InfoCard(
       title: 'Recent activity',
-      child: controller.activityLog.isEmpty
+      child: loadingActivity
+          ? const _SkeletonInfoRows(rowCount: 5)
+          : controller.activityLog.isEmpty
           ? const _EmptyState('No local activity yet.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,37 +412,40 @@ class _OverviewPage extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 1100;
-        final metricStrip = Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: <Widget>[
-            _MetricCard(
-              title: 'Gateway',
-              value: controller.serverVersion ?? 'Disconnected',
-              subtitle:
-                  controller.connectedGatewayTitle ?? 'No active endpoint',
-            ),
-            _MetricCard(
-              title: 'Role',
-              value: controller.client?.hello.auth?.role ?? 'offline',
-              subtitle:
-                  controller.client?.hello.auth?.scopes.join(', ') ??
-                  'No granted scopes',
-            ),
-            _MetricCard(
-              title: 'Sessions',
-              value: '${controller.sessionsList?.count ?? 0}',
-              subtitle: controller.config.preferredSessionKey,
-            ),
-            _MetricCard(
-              title: 'Nodes',
-              value: '${controller.nodes.length}',
-              subtitle: controller.nodes.isEmpty
-                  ? 'No paired nodes'
-                  : 'Paired nodes available',
-            ),
-          ],
-        );
+        final metricStrip = controller.busy && controller.serverVersion == null
+            ? const _SkeletonMetricStrip(count: 4)
+            : Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: <Widget>[
+                  _MetricCard(
+                    title: 'Gateway',
+                    value: controller.serverVersion ?? 'Disconnected',
+                    subtitle:
+                        controller.connectedGatewayTitle ??
+                        'No active endpoint',
+                  ),
+                  _MetricCard(
+                    title: 'Role',
+                    value: controller.client?.hello.auth?.role ?? 'offline',
+                    subtitle:
+                        controller.client?.hello.auth?.scopes.join(', ') ??
+                        'No granted scopes',
+                  ),
+                  _MetricCard(
+                    title: 'Sessions',
+                    value: '${controller.sessionsList?.count ?? 0}',
+                    subtitle: controller.config.preferredSessionKey,
+                  ),
+                  _MetricCard(
+                    title: 'Nodes',
+                    value: '${controller.nodes.length}',
+                    subtitle: controller.nodes.isEmpty
+                        ? 'No paired nodes'
+                        : 'Paired nodes available',
+                  ),
+                ],
+              );
 
         if (!wide) {
           return ListView(
@@ -460,9 +503,16 @@ class _ExplorePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loadingChannels =
+        controller.busy && controller.channelsStatus == null;
+    final loadingNodes = controller.busy && controller.nodes.isEmpty;
+    final loadingModels = controller.busy && controller.models == null;
+    final loadingTools = controller.busy && controller.tools == null;
     final channelsCard = _InfoCard(
       title: 'Channels',
-      child: controller.channelsStatus == null
+      child: loadingChannels
+          ? const _SkeletonCardList(count: 4)
+          : controller.channelsStatus == null
           ? const _EmptyState('No channel snapshot yet.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -577,7 +627,9 @@ class _ExplorePage extends StatelessWidget {
 
     final nodesCard = _InfoCard(
       title: 'Nodes',
-      child: controller.nodes.isEmpty
+      child: loadingNodes
+          ? const _SkeletonCardList(count: 3)
+          : controller.nodes.isEmpty
           ? const _EmptyState('No paired nodes reported.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -672,7 +724,16 @@ class _ExplorePage extends StatelessWidget {
 
     final modelsCard = _InfoCard(
       title: 'Models',
-      child: controller.models == null
+      child: loadingModels
+          ? const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _SkeletonMetricStrip(count: 2),
+                SizedBox(height: 16),
+                _SkeletonChipWrap(count: 7),
+              ],
+            )
+          : controller.models == null
           ? const _EmptyState('No model catalog loaded.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -713,7 +774,16 @@ class _ExplorePage extends StatelessWidget {
 
     final toolsCard = _InfoCard(
       title: 'Tools',
-      child: controller.tools == null
+      child: loadingTools
+          ? const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _SkeletonMetricStrip(count: 3),
+                SizedBox(height: 16),
+                _SkeletonCardList(count: 3, minHeight: 56),
+              ],
+            )
+          : controller.tools == null
           ? const _EmptyState('No tool catalog loaded.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -848,9 +918,14 @@ class _EventsPage extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 960;
+        final loadingEvents = controller.busy && controller.eventLines.isEmpty;
+        final loadingActivity =
+            controller.busy && controller.activityLog.isEmpty;
         final eventFeed = _ConsoleCard(
           title: 'Gateway events',
-          child: controller.eventLines.isEmpty
+          child: loadingEvents
+              ? const _ConsoleLoadingList(count: 5)
+              : controller.eventLines.isEmpty
               ? const _EmptyState('No events yet.')
               : ListView.separated(
                   itemCount: controller.eventLines.length,
@@ -871,7 +946,9 @@ class _EventsPage extends StatelessWidget {
 
         final activityFeed = _ConsoleCard(
           title: 'Activity log',
-          child: controller.activityLog.isEmpty
+          child: loadingActivity
+              ? const _ConsoleLoadingList(count: 6)
+              : controller.activityLog.isEmpty
               ? const _EmptyState('No activity yet.')
               : ListView.builder(
                   itemCount: controller.activityLog.length,
@@ -880,8 +957,9 @@ class _EventsPage extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: SelectableText(
                         controller.activityLog[index],
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        style: DefaultTextStyle.of(context).style.copyWith(
                           fontFamily: 'monospace',
+                          color: const Color(0xFFD4E0DC),
                         ),
                       ),
                     );

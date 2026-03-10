@@ -509,14 +509,42 @@ class _ConsoleCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            DefaultTextStyle(
-              style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                color: const Color(0xFFD4E0DC),
-                fontFamily: 'monospace',
+            Expanded(
+              child: DefaultTextStyle(
+                style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                  color: const Color(0xFFD4E0DC),
+                  fontFamily: 'monospace',
+                ),
+                child: child,
               ),
-              child: child,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConsoleLoadingList extends StatelessWidget {
+  const _ConsoleLoadingList({this.count = 4});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List<Widget>.generate(
+        count,
+        (index) => Padding(
+          padding: EdgeInsets.only(bottom: index == count - 1 ? 0 : 14),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _SkeletonBox(height: 12, width: 160),
+              SizedBox(height: 8),
+              _SkeletonBox(height: 12),
+            ],
+          ),
         ),
       ),
     );
@@ -537,6 +565,273 @@ class _HintCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
       ),
       child: Padding(padding: const EdgeInsets.all(14), child: Text(text)),
+    );
+  }
+}
+
+class _LoadingBanner extends StatelessWidget {
+  const _LoadingBanner({required this.label, this.detail});
+
+  final String label;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4EEE3),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFDCCFBE)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(
+          children: <Widget>[
+            const SizedBox(width: 18, height: 18, child: _LoadingSpinner()),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (detail?.trim().isNotEmpty == true) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      detail!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF5E706B),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadingSpinner extends StatefulWidget {
+  const _LoadingSpinner();
+
+  @override
+  State<_LoadingSpinner> createState() => _LoadingSpinnerState();
+}
+
+class _LoadingSpinnerState extends State<_LoadingSpinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: CustomPaint(painter: _SpinnerPainter()),
+    );
+  }
+}
+
+class _SpinnerPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xFF7A5C38);
+    canvas.drawArc(rect.deflate(1), 0.1, 4.6, false, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _SkeletonBox extends StatefulWidget {
+  const _SkeletonBox({required this.height, this.width, this.radius = 12});
+
+  final double height;
+  final double? width;
+  final double radius;
+
+  @override
+  State<_SkeletonBox> createState() => _SkeletonBoxState();
+}
+
+class _SkeletonBoxState extends State<_SkeletonBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.42, end: 0.9).animate(_controller),
+      child: Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFD7CCBC),
+          borderRadius: BorderRadius.circular(widget.radius),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonMetricStrip extends StatelessWidget {
+  const _SkeletonMetricStrip({this.count = 4});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 16,
+      runSpacing: 16,
+      children: List<Widget>.generate(
+        count,
+        (_) => SizedBox(
+          width: 240,
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const <Widget>[
+                  _SkeletonBox(height: 12, width: 74),
+                  SizedBox(height: 10),
+                  _SkeletonBox(height: 28, width: 120),
+                  SizedBox(height: 8),
+                  _SkeletonBox(height: 14, width: 164),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonInfoRows extends StatelessWidget {
+  const _SkeletonInfoRows({this.rowCount = 4});
+
+  final int rowCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        ...List<Widget>.generate(
+          rowCount,
+          (index) => Padding(
+            padding: EdgeInsets.only(bottom: index == rowCount - 1 ? 0 : 10),
+            child: Row(
+              children: const <Widget>[
+                Expanded(child: _SkeletonBox(height: 12)),
+                SizedBox(width: 12),
+                _SkeletonBox(height: 12, width: 88),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SkeletonCardList extends StatelessWidget {
+  const _SkeletonCardList({this.count = 3, this.minHeight = 72});
+
+  final int count;
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List<Widget>.generate(
+        count,
+        (index) => Padding(
+          padding: EdgeInsets.only(bottom: index == count - 1 ? 0 : 12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFCF8),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE3DBCF)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: minHeight),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(child: _SkeletonBox(height: 14, width: 144)),
+                        SizedBox(width: 12),
+                        _SkeletonBox(height: 26, width: 72, radius: 999),
+                      ],
+                    ),
+                    SizedBox(height: 10),
+                    _SkeletonBox(height: 12),
+                    SizedBox(height: 8),
+                    _SkeletonBox(height: 12, width: 168),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonChipWrap extends StatelessWidget {
+  const _SkeletonChipWrap({this.count = 6});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: List<Widget>.generate(
+        count,
+        (index) => _SkeletonBox(
+          height: 30,
+          width: 92 + ((index % 3) * 28),
+          radius: 999,
+        ),
+      ),
     );
   }
 }

@@ -48,6 +48,12 @@ class _ConnectionPanel extends StatelessWidget {
     final visibleAuthModes = CompanionAuthMode.values
         .where((mode) => mode != CompanionAuthMode.none)
         .toList(growable: false);
+    final connectionLabel = switch (controller.connectionState.phase) {
+      GatewayConnectionPhase.connecting => 'Connecting to the gateway',
+      GatewayConnectionPhase.reconnecting => 'Reconnecting to the gateway',
+      _ when controller.busy => 'Working on your connection',
+      _ => null,
+    };
 
     final panel = Column(
       children: <Widget>[
@@ -91,6 +97,13 @@ class _ConnectionPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                if (connectionLabel != null) ...<Widget>[
+                  _LoadingBanner(
+                    label: connectionLabel,
+                    detail: controller.connectedGatewayTitle,
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 _SheetSection(
                   title: 'Quick start',
                   subtitle: 'Paste a setup code or pick a local gateway.',
@@ -117,7 +130,10 @@ class _ConnectionPanel extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      if (controller.discoveredGateways.isEmpty)
+                      if (controller.busy &&
+                          controller.discoveredGateways.isEmpty)
+                        const _SkeletonCardList(count: 2, minHeight: 84)
+                      else if (controller.discoveredGateways.isEmpty)
                         const _HintCard(
                           text: 'No gateways found on the local network yet.',
                         )
@@ -258,7 +274,7 @@ class _ConnectionPanel extends StatelessWidget {
                         : () {
                             unawaited(onConnectManual());
                           },
-                    child: const Text('Connect'),
+                    child: Text(controller.busy ? 'Working…' : 'Connect'),
                   ),
                 ),
                 const SizedBox(width: 12),
