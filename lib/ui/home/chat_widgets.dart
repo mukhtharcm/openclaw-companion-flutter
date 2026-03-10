@@ -537,22 +537,23 @@ class _ChatMessageSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final attachmentParts = message.content
-        .where((part) => part.isAttachment)
-        .toList(growable: false);
-    final toolCallParts = message.content
-        .where((part) => part.isToolCall)
-        .toList(growable: false);
-    final toolResultParts = message.content
-        .where((part) => part.isToolResult)
-        .toList(growable: false);
+    final attachmentParts = message.attachmentParts;
+    final toolCallParts = message.toolCallParts;
+    final toolResultParts = message.toolResultParts;
+    final thinkingParts = message.thinkingParts;
+    final showStructuredFallback =
+        !message.hasVisibleText &&
+        attachmentParts.isEmpty &&
+        toolCallParts.isEmpty &&
+        toolResultParts.isEmpty &&
+        thinkingParts.isEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (message.hasVisibleText)
           _MarkdownTextBlock(text: message.primaryText)
-        else
+        else if (showStructuredFallback)
           _StructuredChatFallback(message: message),
         if (attachmentParts.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
@@ -562,9 +563,7 @@ class _ChatMessageSection extends StatelessWidget {
             children: attachmentParts
                 .map(
                   (part) => Chip(
-                    label: Text(
-                      part.fileName ?? part.mimeType ?? part.normalizedType,
-                    ),
+                    label: Text(part.displayLabel),
                     avatar: const Icon(Icons.attachment_rounded, size: 16),
                   ),
                 )
@@ -573,51 +572,44 @@ class _ChatMessageSection extends StatelessWidget {
         ],
         if (toolCallParts.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: toolCallParts
-                .map(
-                  (part) => Chip(
-                    label: Text(part.name ?? part.id ?? 'tool call'),
-                    avatar: const Icon(Icons.handyman_outlined, size: 16),
-                  ),
-                )
-                .toList(growable: false),
+          ...toolCallParts.map(
+            (part) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _StructuredPayloadCard(
+                icon: Icons.handyman_outlined,
+                title: part.name ?? message.toolName ?? 'Tool call',
+                subtitle: part.id ?? message.toolCallId,
+                payload: part.structuredPayload,
+                emptyLabel: 'No tool arguments attached.',
+                preview: part.structuredPreview,
+              ),
+            ),
           ),
         ],
         if (toolResultParts.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
           ...toolResultParts.map(
-            (part) => DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0x14FFFFFF),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0x1F162220)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: part.text?.trim().isNotEmpty == true
-                    ? Text(
-                        part.text!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF5E706B),
-                        ),
-                      )
-                    : _ToolResultFallback(part: part),
+            (part) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _StructuredPayloadCard(
+                icon: Icons.data_object_rounded,
+                title: part.name ?? message.toolName ?? 'Tool result',
+                subtitle: part.id,
+                payload: part.structuredPayload,
+                emptyLabel: 'No structured tool result attached.',
+                preview: part.text?.trim().isNotEmpty == true
+                    ? part.text!.trim()
+                    : part.structuredPreview,
               ),
             ),
           ),
         ],
-        if (message.content.any(
-          (part) => part.thinking?.trim().isNotEmpty == true,
-        )) ...<Widget>[
+        if (thinkingParts.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: message.content
-                .where((part) => part.thinking?.trim().isNotEmpty == true)
+            children: thinkingParts
                 .map(
                   (part) => _StatePill(
                     label:
@@ -630,7 +622,7 @@ class _ChatMessageSection extends StatelessWidget {
           ),
         ],
         if (message.usage?.total != null ||
-            message.stopReason != null) ...<Widget>[
+            message.stopReason?.trim().isNotEmpty == true) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
             spacing: 10,
@@ -727,38 +719,138 @@ class _StructuredChatFallback extends StatelessWidget {
   }
 }
 
-class _ToolResultFallback extends StatelessWidget {
-  const _ToolResultFallback({required this.part});
+class _StructuredPayloadCard extends StatefulWidget {
+  const _StructuredPayloadCard({
+    required this.icon,
+    required this.title,
+    required this.payload,
+    required this.emptyLabel,
+    required this.preview,
+    this.subtitle,
+  });
 
-  final GatewayChatMessageContent part;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Object? payload;
+  final String emptyLabel;
+  final String preview;
+
+  @override
+  State<_StructuredPayloadCard> createState() => _StructuredPayloadCardState();
+}
+
+class _StructuredPayloadCardState extends State<_StructuredPayloadCard> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
-    final detailParts = <String>[
-      if (part.name?.trim().isNotEmpty == true) part.name!,
-      if (part.id?.trim().isNotEmpty == true) 'id ${part.id!}',
-      if (part.mimeType?.trim().isNotEmpty == true) part.mimeType!,
-    ];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          'Structured tool result',
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: const Color(0xFF5A4A3B),
-            fontWeight: FontWeight.w800,
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8F4ED),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2D8C8)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8E1D1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Icon(
+                          widget.icon,
+                          size: 18,
+                          color: const Color(0xFF7A5C38),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            widget.title,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: const Color(0xFF5A4A3B),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          if (widget.subtitle?.trim().isNotEmpty ==
+                              true) ...<Widget>[
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.subtitle!,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: const Color(0xFF5E706B)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (widget.payload != null)
+                      IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _expanded = !_expanded;
+                          });
+                        },
+                        tooltip: _expanded ? 'Hide details' : 'Show details',
+                        icon: Icon(
+                          _expanded
+                              ? Icons.keyboard_arrow_up_rounded
+                              : Icons.keyboard_arrow_down_rounded,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  widget.preview.trim().isNotEmpty == true
+                      ? widget.preview
+                      : widget.emptyLabel,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF5E706B),
+                    height: 1.45,
+                  ),
+                ),
+                if (_expanded && widget.payload != null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFCF8),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE3DBCF)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SelectableText(
+                        prettyChatValue(widget.payload),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF1B2220),
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
-        if (detailParts.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 6),
-          Text(
-            detailParts.join(' • '),
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF5E706B)),
-          ),
-        ],
       ],
     );
   }
