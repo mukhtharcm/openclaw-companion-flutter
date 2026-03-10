@@ -71,6 +71,7 @@ class _ConversationHeader extends StatelessWidget {
     required this.title,
     required this.sessionKey,
     required this.thinking,
+    required this.onThinkingChanged,
     required this.activeRunId,
     required this.onReloadHistory,
     required this.onAbortRun,
@@ -80,6 +81,7 @@ class _ConversationHeader extends StatelessWidget {
   final String title;
   final String sessionKey;
   final String thinking;
+  final ValueChanged<String> onThinkingChanged;
   final String? activeRunId;
   final VoidCallback? onReloadHistory;
   final VoidCallback? onAbortRun;
@@ -91,53 +93,43 @@ class _ConversationHeader extends StatelessWidget {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 720;
         final stacked = constraints.maxWidth < 920;
+        final thinkingButton = _ThinkingMenuButton(
+          value: thinking,
+          onSelected: onThinkingChanged,
+        );
         if (compact) {
           return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      sessionKey,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF5E706B),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               if (onBrowseSessions != null)
-                IconButton(
+                _ConversationActionButton(
                   tooltip: 'Sessions',
                   onPressed: onBrowseSessions,
-                  icon: const Icon(Icons.menu_open_rounded),
+                  icon: const Icon(Icons.toc_rounded),
                 ),
-              IconButton(
+              thinkingButton,
+              _ConversationActionButton(
                 tooltip: 'Refresh',
                 onPressed: onReloadHistory,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(Icons.sync_rounded),
               ),
               if (activeRunId != null)
-                IconButton(
+                _ConversationActionButton(
                   tooltip: 'Abort run',
                   onPressed: onAbortRun,
-                  icon: const Icon(Icons.stop_circle_outlined),
+                  icon: const Icon(Icons.stop_rounded),
                 ),
             ],
           );
@@ -149,21 +141,23 @@ class _ConversationHeader extends StatelessWidget {
           alignment: WrapAlignment.end,
           children: <Widget>[
             if (onBrowseSessions != null)
-              OutlinedButton.icon(
+              _ConversationActionButton(
+                tooltip: 'Sessions',
                 onPressed: onBrowseSessions,
-                icon: const Icon(Icons.menu_open_rounded),
-                label: const Text('Sessions'),
+                icon: const Icon(Icons.toc_rounded),
               ),
-            OutlinedButton.icon(
+            thinkingButton,
+            _ConversationActionButton(
+              tooltip: 'Refresh',
               onPressed: onReloadHistory,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Refresh'),
+              icon: const Icon(Icons.sync_rounded),
             ),
-            OutlinedButton.icon(
-              onPressed: onAbortRun,
-              icon: const Icon(Icons.stop_circle_outlined),
-              label: const Text('Abort run'),
-            ),
+            if (activeRunId != null)
+              _ConversationActionButton(
+                tooltip: 'Abort run',
+                onPressed: onAbortRun,
+                icon: const Icon(Icons.stop_rounded),
+              ),
           ],
         );
 
@@ -177,28 +171,15 @@ class _ConversationHeader extends StatelessWidget {
                 letterSpacing: -0.6,
               ),
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: <Widget>[
-                _HeaderPill(
-                  icon: Icons.psychology_alt_outlined,
-                  label: thinking,
-                  tint: const Color(0xFFE6EBE3),
-                ),
-                _HeaderPill(
-                  icon: Icons.tag_rounded,
-                  label: sessionKey,
-                  tint: const Color(0xFFE8E1D1),
-                ),
-                if (activeRunId != null)
-                  _HeaderPill(
-                    icon: Icons.timelapse_rounded,
-                    label: 'Live run',
-                    tint: const Color(0xFFECE8F8),
-                  ),
-              ],
+            const SizedBox(height: 6),
+            Text(
+              activeRunId == null ? sessionKey : '$sessionKey  •  Live run',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF5E706B),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         );
@@ -219,6 +200,86 @@ class _ConversationHeader extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _ConversationActionButton extends StatelessWidget {
+  const _ConversationActionButton({
+    required this.tooltip,
+    required this.onPressed,
+    required this.icon,
+  });
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Widget icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: _ConversationActionSurface(
+        child: IconButton(
+          onPressed: onPressed,
+          icon: icon,
+          padding: const EdgeInsets.all(10),
+          constraints: const BoxConstraints.tightFor(width: 42, height: 42),
+          iconSize: 18,
+          splashRadius: 20,
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationActionSurface extends StatelessWidget {
+  const _ConversationActionSurface({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFCF8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFDCCFBE)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ThinkingMenuButton extends StatelessWidget {
+  const _ThinkingMenuButton({required this.value, required this.onSelected});
+
+  final String value;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Thinking: $value',
+      child: PopupMenuButton<String>(
+        tooltip: '',
+        padding: EdgeInsets.zero,
+        onSelected: onSelected,
+        itemBuilder: (context) =>
+            const <String>['default', 'low', 'medium', 'high']
+                .map(
+                  (option) =>
+                      PopupMenuItem<String>(value: option, child: Text(option)),
+                )
+                .toList(growable: false),
+        child: const _ConversationActionSurface(
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Center(child: Icon(Icons.auto_awesome_rounded, size: 18)),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -266,6 +327,134 @@ class _ConversationEmptyState extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF5E706B)),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationLoadingState extends StatelessWidget {
+  const _ConversationLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+      children: const <Widget>[
+        _TranscriptLoadingCard(outbound: false, lines: 3),
+        SizedBox(height: 12),
+        _TranscriptLoadingCard(outbound: true, lines: 2),
+        SizedBox(height: 12),
+        _TranscriptLoadingCard(outbound: false, lines: 4),
+      ],
+    );
+  }
+}
+
+class _TranscriptLoadingCard extends StatelessWidget {
+  const _TranscriptLoadingCard({required this.outbound, required this.lines});
+
+  final bool outbound;
+  final int lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: outbound ? Alignment.centerRight : Alignment.centerLeft,
+      child: FractionallySizedBox(
+        widthFactor: outbound ? 0.68 : 0.76,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: outbound ? const Color(0xFFE8E1D1) : const Color(0xFFF3EEE5),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0xFFDCCFBE)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List<Widget>.generate(lines, (index) {
+                final widthFactor = switch (index % 3) {
+                  0 => 1.0,
+                  1 => 0.82,
+                  _ => 0.58,
+                };
+                return Padding(
+                  padding: EdgeInsets.only(bottom: index == lines - 1 ? 0 : 10),
+                  child: FractionallySizedBox(
+                    widthFactor: widthFactor,
+                    child: const _PulseLine(),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PulseLine extends StatefulWidget {
+  const _PulseLine();
+
+  @override
+  State<_PulseLine> createState() => _PulseLineState();
+}
+
+class _PulseLineState extends State<_PulseLine>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.45, end: 0.95).animate(_controller),
+      child: Container(
+        height: 12,
+        decoration: BoxDecoration(
+          color: const Color(0xFFCFC5B5),
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScrollToLatestButton extends StatelessWidget {
+  const _ScrollToLatestButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF162220),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 16,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: IconButton(
+        tooltip: 'Scroll to latest',
+        onPressed: onPressed,
+        icon: const Icon(
+          Icons.vertical_align_bottom_rounded,
+          color: Colors.white,
         ),
       ),
     );
@@ -364,7 +553,7 @@ class _ChatMessageSection extends StatelessWidget {
         if (message.hasVisibleText)
           _MarkdownTextBlock(text: message.primaryText)
         else
-          SelectableText(debugChatMessage(message.raw)),
+          _StructuredChatFallback(message: message),
         if (attachmentParts.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
@@ -408,16 +597,36 @@ class _ChatMessageSection extends StatelessWidget {
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: Text(
-                  part.text?.trim().isNotEmpty == true
-                      ? part.text!
-                      : debugChatMessage(part.raw),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF5E706B),
-                  ),
-                ),
+                child: part.text?.trim().isNotEmpty == true
+                    ? Text(
+                        part.text!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5E706B),
+                        ),
+                      )
+                    : _ToolResultFallback(part: part),
               ),
             ),
+          ),
+        ],
+        if (message.content.any(
+          (part) => part.thinking?.trim().isNotEmpty == true,
+        )) ...<Widget>[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: message.content
+                .where((part) => part.thinking?.trim().isNotEmpty == true)
+                .map(
+                  (part) => _StatePill(
+                    label:
+                        'Thinking${part.thinkingSignature?.trim().isNotEmpty == true ? ' • signed' : ''}',
+                    tint: const Color(0xFFE8E1D1),
+                    icon: Icons.psychology_alt_rounded,
+                  ),
+                )
+                .toList(growable: false),
           ),
         ],
         if (message.usage?.total != null ||
@@ -442,6 +651,112 @@ class _ChatMessageSection extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StructuredChatFallback extends StatelessWidget {
+  const _StructuredChatFallback({required this.message});
+
+  final GatewayChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasToolCall = message.content.any((part) => part.isToolCall);
+    final hasToolResult = message.content.any((part) => part.isToolResult);
+    final hasAttachment = message.content.any((part) => part.isAttachment);
+    final hasThinking = message.content.any(
+      (part) => part.thinking?.trim().isNotEmpty == true,
+    );
+
+    final label = switch ((
+      hasToolCall,
+      hasToolResult,
+      hasAttachment,
+      hasThinking,
+    )) {
+      (true, _, _, _) => 'Tool activity',
+      (_, true, _, _) => 'Tool result',
+      (_, _, true, _) => 'Attachment message',
+      (_, _, _, true) => 'Reasoning update',
+      _ => 'Structured message',
+    };
+
+    final detailParts = <String>[
+      if (message.toolName?.trim().isNotEmpty == true) message.toolName!,
+      if (message.toolCallId?.trim().isNotEmpty == true)
+        'call ${message.toolCallId!}',
+      if (message.content.isNotEmpty)
+        '${message.content.length} part${message.content.length == 1 ? '' : 's'}',
+    ];
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFCF8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2D8C8)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: const Color(0xFF5A4A3B),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (detailParts.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                detailParts.join(' • '),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF5E706B)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolResultFallback extends StatelessWidget {
+  const _ToolResultFallback({required this.part});
+
+  final GatewayChatMessageContent part;
+
+  @override
+  Widget build(BuildContext context) {
+    final detailParts = <String>[
+      if (part.name?.trim().isNotEmpty == true) part.name!,
+      if (part.id?.trim().isNotEmpty == true) 'id ${part.id!}',
+      if (part.mimeType?.trim().isNotEmpty == true) part.mimeType!,
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Structured tool result',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: const Color(0xFF5A4A3B),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        if (detailParts.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            detailParts.join(' • '),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF5E706B)),
           ),
         ],
       ],

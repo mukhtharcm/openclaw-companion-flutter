@@ -199,33 +199,72 @@ class _OverviewPage extends StatelessWidget {
     final sessionItems =
         controller.sessionsList?.sessions ?? const <GatewaySessionRow>[];
     final featuredSessions = sessionItems.take(5).toList(growable: false);
+    final health = controller.health;
 
     final healthCard = _InfoCard(
       title: 'Health snapshot',
-      child: controller.health == null
+      child: health == null
           ? const _EmptyState('Connect and refresh to load gateway health.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                _InfoLine('Healthy', controller.health!.ok ? 'Yes' : 'No'),
-                _InfoLine(
-                  'Default agent',
-                  controller.health!.defaultAgentId ?? '—',
-                ),
-                _InfoLine(
-                  'Heartbeat',
-                  controller.health!.heartbeatSeconds?.toString() ?? '—',
-                ),
-                const SizedBox(height: 12),
-                ...controller.health!.channelOrder.take(6).map((id) {
-                  final channel = controller.health!.channels[id];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '${controller.health!.channelLabels[id] ?? id}: ${channel ?? 'unknown'}',
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: <Widget>[
+                    _SnapshotMetric(
+                      label: 'Healthy',
+                      value: health.ok ? 'Yes' : 'No',
+                      icon: health.ok
+                          ? Icons.health_and_safety_rounded
+                          : Icons.warning_amber_rounded,
                     ),
-                  );
-                }),
+                    _SnapshotMetric(
+                      label: 'Channels',
+                      value: '${health.channelOrder.length}',
+                      icon: Icons.hub_rounded,
+                    ),
+                    _SnapshotMetric(
+                      label: 'Heartbeat',
+                      value: health.heartbeatSeconds == null
+                          ? '—'
+                          : '${health.heartbeatSeconds}s',
+                      icon: Icons.favorite_rounded,
+                    ),
+                    _SnapshotMetric(
+                      label: 'Default agent',
+                      value: health.defaultAgentId ?? '—',
+                      icon: Icons.smart_toy_rounded,
+                    ),
+                  ],
+                ),
+                if (health.channelOrder.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 18),
+                  Text(
+                    'Channel pulse',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: const Color(0xFF5E706B),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: health.channelOrder
+                        .take(8)
+                        .map((id) {
+                          final state = health.channels[id];
+                          final label = health.channelLabels[id] ?? id;
+                          return _StatePill(
+                            label: '$label • ${_channelStateLabel(state)}',
+                            tint: _channelStateTint(state),
+                            icon: _channelStateIcon(state),
+                          );
+                        })
+                        .toList(growable: false),
+                  ),
+                ],
               ],
             ),
     );
@@ -428,14 +467,110 @@ class _ExplorePage extends StatelessWidget {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: controller.channelsStatus!.channelOrder
-                  .map(
-                    (channelId) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        '${controller.channelsStatus!.channelLabels[channelId] ?? channelId}: ${controller.channelsStatus!.channels[channelId] ?? 'unknown'}',
+                  .map((channelId) {
+                    final state =
+                        controller.channelsStatus!.channels[channelId];
+                    final accounts =
+                        controller.channelsStatus!.channelAccounts[channelId] ??
+                        const <GatewayChannelAccountSnapshot>[];
+                    final detail = controller
+                        .channelsStatus!
+                        .channelDetailLabels[channelId];
+                    final defaultAccount = controller
+                        .channelsStatus!
+                        .channelDefaultAccountId[channelId];
+                    final accountLabel =
+                        '${accounts.length} account${accounts.length == 1 ? '' : 's'}';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFCF8),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: const Color(0xFFE3DBCF)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final header = Text(
+                                    controller
+                                            .channelsStatus!
+                                            .channelLabels[channelId] ??
+                                        channelId,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  );
+                                  final statusPill = _StatePill(
+                                    label: _channelStateLabel(state),
+                                    tint: _channelStateTint(state),
+                                    icon: _channelStateIcon(state),
+                                  );
+                                  if (constraints.maxWidth < 360) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        header,
+                                        const SizedBox(height: 10),
+                                        statusPill,
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Expanded(child: header),
+                                      const SizedBox(width: 12),
+                                      statusPill,
+                                    ],
+                                  );
+                                },
+                              ),
+                              if (detail?.trim().isNotEmpty == true) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  detail!,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: const Color(0xFF5E706B),
+                                      ),
+                                ),
+                              ],
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: <Widget>[
+                                  _StatePill(
+                                    label: accountLabel,
+                                    tint: const Color(0xFFE8E1D1),
+                                    icon: Icons.alternate_email_rounded,
+                                  ),
+                                  if (defaultAccount?.trim().isNotEmpty == true)
+                                    _StatePill(
+                                      label: 'Default $defaultAccount',
+                                      tint: const Color(0xFFE6EBE3),
+                                      icon: Icons.star_rounded,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  )
+                    );
+                  })
                   .toList(growable: false),
             ),
     );
@@ -450,25 +585,74 @@ class _ExplorePage extends StatelessWidget {
                   .map(
                     (node) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              node.displayName ?? node.nodeId,
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFCF8),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: const Color(0xFFE3DBCF)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      node.displayName ?? node.nodeId,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                    ),
+                                  ),
+                                  _StatePill(
+                                    label: node.connected
+                                        ? 'Connected'
+                                        : 'Offline',
+                                    tint: node.connected
+                                        ? const Color(0xFFE6EBE3)
+                                        : const Color(0xFFE9E7E4),
+                                    icon: node.connected
+                                        ? Icons.link_rounded
+                                        : Icons.link_off_rounded,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                [node.platform, node.deviceFamily, node.version]
+                                    .whereType<String>()
+                                    .where((value) => value.isNotEmpty)
+                                    .join(' • '),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: const Color(0xFF5E706B)),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: <Widget>[
+                                  _StatePill(
+                                    label:
+                                        '${node.caps.length} ${node.caps.length == 1 ? 'capability' : 'capabilities'}',
+                                    tint: const Color(0xFFE8E1D1),
+                                    icon: Icons.widgets_rounded,
+                                  ),
+                                  _StatePill(
+                                    label:
+                                        '${node.commands.length} command${node.commands.length == 1 ? '' : 's'}',
+                                    tint: const Color(0xFFE6EBE3),
+                                    icon: Icons.terminal_rounded,
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                          _HeaderPill(
-                            icon: node.connected
-                                ? Icons.link_rounded
-                                : Icons.link_off_rounded,
-                            label: node.connected ? 'Connected' : 'Offline',
-                            tint: node.connected
-                                ? const Color(0xFFE6EBE3)
-                                : const Color(0xFFE9E7E4),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   )
@@ -476,19 +660,54 @@ class _ExplorePage extends StatelessWidget {
             ),
     );
 
+    final providerCounts = <String, int>{};
+    for (final model
+        in controller.models?.models ?? const <GatewayModelChoice>[]) {
+      providerCounts.update(
+        model.provider,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+
     final modelsCard = _InfoCard(
       title: 'Models',
       child: controller.models == null
           ? const _EmptyState('No model catalog loaded.')
-          : Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: controller.models!.models
-                  .map(
-                    (model) =>
-                        Chip(label: Text('${model.provider} · ${model.name}')),
-                  )
-                  .toList(growable: false),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: <Widget>[
+                    _SnapshotMetric(
+                      label: 'Available models',
+                      value: '${controller.models!.models.length}',
+                      icon: Icons.model_training_rounded,
+                    ),
+                    _SnapshotMetric(
+                      label: 'Providers',
+                      value: '${providerCounts.length}',
+                      icon: Icons.account_tree_rounded,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: providerCounts.entries
+                      .map(
+                        (entry) => _StatePill(
+                          label: '${entry.key} • ${entry.value}',
+                          tint: const Color(0xFFE8E1D1),
+                          icon: Icons.memory_rounded,
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ],
             ),
     );
 
@@ -498,31 +717,78 @@ class _ExplorePage extends StatelessWidget {
           ? const _EmptyState('No tool catalog loaded.')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: controller.tools!.groups
-                  .map(
-                    (group) => Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            group.label,
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: group.tools
-                                .map((tool) => Chip(label: Text(tool.label)))
-                                .toList(growable: false),
-                          ),
-                        ],
+              children: <Widget>[
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: <Widget>[
+                    _SnapshotMetric(
+                      label: 'Tool groups',
+                      value: '${controller.tools!.groups.length}',
+                      icon: Icons.grid_view_rounded,
+                    ),
+                    _SnapshotMetric(
+                      label: 'Profiles',
+                      value: '${controller.tools!.profiles.length}',
+                      icon: Icons.tune_rounded,
+                    ),
+                    _SnapshotMetric(
+                      label: 'Agent',
+                      value: controller.tools!.agentId,
+                      icon: Icons.smart_toy_rounded,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ...controller.tools!.groups.map(
+                  (group) => Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFCF8),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFE3DBCF)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    group.label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    group.source,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: const Color(0xFF5E706B),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _StatePill(
+                              label:
+                                  '${group.tools.length} tool${group.tools.length == 1 ? '' : 's'}',
+                              tint: const Color(0xFFE6EBE3),
+                              icon: Icons.build_rounded,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  )
-                  .toList(growable: false),
+                  ),
+                ),
+              ],
             ),
     );
 
@@ -643,4 +909,50 @@ class _EventsPage extends StatelessWidget {
       },
     );
   }
+}
+
+String _channelStateLabel(Object? value) {
+  if (value == null) {
+    return 'Unknown';
+  }
+  if (value is bool) {
+    return value ? 'Ready' : 'Offline';
+  }
+  final text = value.toString().trim();
+  if (text.isEmpty) {
+    return 'Unknown';
+  }
+  final normalized = text.toLowerCase();
+  return switch (normalized) {
+    'ok' => 'Ready',
+    'online' => 'Ready',
+    'healthy' => 'Ready',
+    'ready' => 'Ready',
+    'connected' => 'Connected',
+    'disconnected' => 'Offline',
+    'offline' => 'Offline',
+    _ => text,
+  };
+}
+
+Color _channelStateTint(Object? value) {
+  final normalized = _channelStateLabel(value).toLowerCase();
+  if (normalized == 'ready' || normalized == 'connected') {
+    return const Color(0xFFE6EBE3);
+  }
+  if (normalized == 'offline') {
+    return const Color(0xFFE9E7E4);
+  }
+  return const Color(0xFFE8E1D1);
+}
+
+IconData _channelStateIcon(Object? value) {
+  final normalized = _channelStateLabel(value).toLowerCase();
+  if (normalized == 'ready' || normalized == 'connected') {
+    return Icons.check_circle_rounded;
+  }
+  if (normalized == 'offline') {
+    return Icons.pause_circle_rounded;
+  }
+  return Icons.radio_button_checked_rounded;
 }

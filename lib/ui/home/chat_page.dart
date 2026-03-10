@@ -39,10 +39,16 @@ class _SessionsPageState extends State<_SessionsPage> {
   final ScrollController _sessionListScrollController = ScrollController();
   final ScrollController _transcriptScrollController = ScrollController();
   bool _pinTranscriptToBottom = true;
+  late String _lastSessionKey;
+  late int _lastTranscriptLength;
+  late String? _lastStreamingAssistantText;
 
   @override
   void initState() {
     super.initState();
+    _lastSessionKey = widget.controller.config.preferredSessionKey;
+    _lastTranscriptLength = widget.controller.transcript.length;
+    _lastStreamingAssistantText = widget.controller.streamingAssistantText;
     _transcriptScrollController.addListener(_handleTranscriptScroll);
   }
 
@@ -50,21 +56,19 @@ class _SessionsPageState extends State<_SessionsPage> {
   void didUpdateWidget(covariant _SessionsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final sessionChanged =
-        oldWidget.controller.config.preferredSessionKey !=
-        widget.controller.config.preferredSessionKey;
+        _lastSessionKey != widget.controller.config.preferredSessionKey;
     final transcriptChanged =
-        oldWidget.controller.transcript.length !=
-            widget.controller.transcript.length ||
-        oldWidget.controller.streamingAssistantText !=
-            widget.controller.streamingAssistantText;
+        _lastTranscriptLength != widget.controller.transcript.length ||
+        _lastStreamingAssistantText != widget.controller.streamingAssistantText;
     if (sessionChanged) {
       _pinTranscriptToBottom = true;
       _scheduleTranscriptScroll(jump: true);
-      return;
-    }
-    if (transcriptChanged) {
+    } else if (transcriptChanged) {
       _scheduleTranscriptScroll();
     }
+    _lastSessionKey = widget.controller.config.preferredSessionKey;
+    _lastTranscriptLength = widget.controller.transcript.length;
+    _lastStreamingAssistantText = widget.controller.streamingAssistantText;
   }
 
   @override
@@ -99,7 +103,7 @@ class _SessionsPageState extends State<_SessionsPage> {
       }
       _transcriptScrollController.animateTo(
         target,
-        duration: const Duration(milliseconds: 180),
+        duration: const Duration(milliseconds: 160),
         curve: Curves.easeOutCubic,
       );
     });
@@ -402,6 +406,7 @@ class _SessionsPageState extends State<_SessionsPage> {
     final transcriptEmpty =
         widget.controller.transcript.isEmpty && !hasStreamingAssistant;
     final compactChat = !split;
+    final showJumpToLatest = !_pinTranscriptToBottom && !transcriptEmpty;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFFF7F3EA),
@@ -422,6 +427,7 @@ class _SessionsPageState extends State<_SessionsPage> {
               title: selectedSessionLabel,
               sessionKey: widget.controller.config.preferredSessionKey,
               thinking: widget.thinking,
+              onThinkingChanged: widget.onThinkingChanged,
               activeRunId: widget.controller.activeRunId,
               onReloadHistory: widget.controller.busy
                   ? null
@@ -445,38 +451,62 @@ class _SessionsPageState extends State<_SessionsPage> {
           Expanded(
             child: DecoratedBox(
               decoration: const BoxDecoration(color: Color(0xFFFFFCF8)),
-              child: transcriptEmpty
-                  ? _ConversationEmptyState(
-                      sessionKey: widget.controller.config.preferredSessionKey,
-                    )
-                  : Scrollbar(
-                      controller: _transcriptScrollController,
-                      thumbVisibility: true,
-                      child: ListView(
-                        controller: _transcriptScrollController,
-                        padding: EdgeInsets.fromLTRB(
-                          compactChat ? 14 : 22,
-                          compactChat ? 14 : 18,
-                          compactChat ? 14 : 22,
-                          compactChat ? 18 : 24,
-                        ),
-                        children: <Widget>[
-                          ...transcriptGroups.map(
-                            (group) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _ChatGroupCard(group: group),
+              child: Stack(
+                children: <Widget>[
+                  Positioned.fill(
+                    child: transcriptEmpty
+                        ? widget.controller.busy
+                              ? const _ConversationLoadingState()
+                              : _ConversationEmptyState(
+                                  sessionKey: widget
+                                      .controller
+                                      .config
+                                      .preferredSessionKey,
+                                )
+                        : Scrollbar(
+                            controller: _transcriptScrollController,
+                            thumbVisibility: true,
+                            child: ListView(
+                              controller: _transcriptScrollController,
+                              padding: EdgeInsets.fromLTRB(
+                                compactChat ? 14 : 22,
+                                compactChat ? 14 : 18,
+                                compactChat ? 14 : 22,
+                                compactChat ? 18 : 24,
+                              ),
+                              children: <Widget>[
+                                ...transcriptGroups.map(
+                                  (group) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _ChatGroupCard(group: group),
+                                  ),
+                                ),
+                                if (hasStreamingAssistant)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: _StreamingChatBubble(
+                                      text: widget
+                                          .controller
+                                          .streamingAssistantText!,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
-                          if (hasStreamingAssistant)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: _StreamingChatBubble(
-                                text: widget.controller.streamingAssistantText!,
-                              ),
-                            ),
-                        ],
+                  ),
+                  if (showJumpToLatest)
+                    Positioned(
+                      right: compactChat ? 14 : 22,
+                      bottom: compactChat ? 14 : 18,
+                      child: _ScrollToLatestButton(
+                        onPressed: () {
+                          _pinTranscriptToBottom = true;
+                          _scheduleTranscriptScroll();
+                        },
                       ),
                     ),
+                ],
+              ),
             ),
           ),
           DecoratedBox(
@@ -495,112 +525,10 @@ class _SessionsPageState extends State<_SessionsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  if (split) ...<Widget>[
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final stacked = constraints.maxWidth < 720;
-                        final thinkingField = SizedBox(
-                          width: stacked ? double.infinity : 164,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: widget.thinking,
-                            decoration: const InputDecoration(
-                              labelText: 'Thinking',
-                              isDense: true,
-                            ),
-                            items:
-                                const <String>[
-                                      'default',
-                                      'low',
-                                      'medium',
-                                      'high',
-                                    ]
-                                    .map(
-                                      (value) => DropdownMenuItem<String>(
-                                        value: value,
-                                        child: Text(value),
-                                      ),
-                                    )
-                                    .toList(growable: false),
-                            onChanged: (value) {
-                              if (value != null) {
-                                widget.onThinkingChanged(value);
-                              }
-                            },
-                          ),
-                        );
-                        final summary = Text(
-                          selectedSession?.lastMessagePreview
-                                      ?.trim()
-                                      .isNotEmpty ==
-                                  true
-                              ? selectedSession!.lastMessagePreview!
-                              : transcriptEmpty
-                              ? 'Pick a thread and send the first prompt to start the transcript.'
-                              : 'Continue the conversation from here.',
-                          maxLines: stacked ? 2 : 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: const Color(0xFF5E706B)),
-                        );
-                        final meta = Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: <Widget>[
-                            _HeaderPill(
-                              icon: Icons.forum_outlined,
-                              label:
-                                  widget.controller.config.preferredSessionKey,
-                              tint: const Color(0xFFE8E1D1),
-                            ),
-                            if (selectedSession != null &&
-                                selectedSession.label?.trim().isNotEmpty ==
-                                    true)
-                              _HeaderPill(
-                                icon: Icons.label_outline_rounded,
-                                label: selectedSession.label!,
-                                tint: const Color(0xFFE6EBE3),
-                              ),
-                          ],
-                        );
-
-                        if (stacked) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              meta,
-                              const SizedBox(height: 10),
-                              summary,
-                              const SizedBox(height: 12),
-                              thinkingField,
-                            ],
-                          );
-                        }
-
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  meta,
-                                  const SizedBox(height: 8),
-                                  summary,
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            thinkingField,
-                          ],
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                  ],
                   TextField(
                     controller: widget.promptController,
-                    minLines: 3,
-                    maxLines: compactChat ? 5 : 6,
+                    minLines: compactChat ? 2 : 3,
+                    maxLines: compactChat ? 4 : 6,
                     decoration: const InputDecoration(
                       hintText: 'Write a prompt, note, or follow-up question',
                     ),
@@ -609,39 +537,96 @@ class _SessionsPageState extends State<_SessionsPage> {
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final stacked = constraints.maxWidth < 520;
-                      final sendButton = FilledButton.icon(
-                        onPressed:
-                            widget.controller.busy ||
-                                widget.controller.activeRunId != null
-                            ? null
-                            : () {
-                                unawaited(widget.onSendPrompt());
-                              },
-                        icon: Icon(
-                          widget.controller.activeRunId == null
-                              ? Icons.north_east_rounded
-                              : Icons.timelapse_rounded,
-                        ),
-                        label: Text(
-                          widget.controller.activeRunId == null
-                              ? 'Send prompt'
-                              : 'Running…',
-                        ),
-                      );
-                      final abortButton = OutlinedButton.icon(
+                      void sendAction() {
+                        if (widget.controller.busy ||
+                            widget.controller.activeRunId != null) {
+                          return;
+                        }
+                        unawaited(widget.onSendPrompt());
+                      }
+
+                      final sendButton = compactChat
+                          ? IconButton.filled(
+                              tooltip: widget.controller.activeRunId == null
+                                  ? 'Send message'
+                                  : 'Run in progress',
+                              onPressed:
+                                  widget.controller.busy ||
+                                      widget.controller.activeRunId != null
+                                  ? null
+                                  : sendAction,
+                              icon: Icon(
+                                widget.controller.activeRunId == null
+                                    ? Icons.arrow_upward_rounded
+                                    : Icons.timelapse_rounded,
+                              ),
+                            )
+                          : FilledButton.icon(
+                              onPressed:
+                                  widget.controller.busy ||
+                                      widget.controller.activeRunId != null
+                                  ? null
+                                  : sendAction,
+                              icon: Icon(
+                                widget.controller.activeRunId == null
+                                    ? Icons.arrow_upward_rounded
+                                    : Icons.timelapse_rounded,
+                              ),
+                              label: Text(
+                                widget.controller.activeRunId == null
+                                    ? 'Send'
+                                    : 'Running',
+                              ),
+                            );
+                      final abortButton = IconButton.filledTonal(
+                        tooltip: 'Abort run',
                         onPressed: widget.controller.activeRunId == null
                             ? null
                             : widget.onAbortRun,
-                        icon: const Icon(Icons.stop_circle_outlined),
-                        label: const Text('Abort'),
+                        icon: const Icon(Icons.stop_rounded),
+                      );
+
+                      final helperText =
+                          selectedSession?.lastMessagePreview
+                                  ?.trim()
+                                  .isNotEmpty ==
+                              true
+                          ? selectedSession!.lastMessagePreview!
+                          : 'Press Enter for a new line, then send when ready.';
+
+                      final helper = Text(
+                        helperText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5E706B),
+                        ),
                       );
 
                       if (stacked) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
                           children: <Widget>[
+                            if (!compactChat) ...<Widget>[
+                              Expanded(child: helper),
+                              const SizedBox(width: 10),
+                            ],
+                            if (!compactChat)
+                              Expanded(child: sendButton)
+                            else
+                              sendButton,
+                            const SizedBox(width: 10),
+                            abortButton,
+                          ],
+                        );
+                      }
+
+                      if (compactChat) {
+                        return Row(
+                          children: <Widget>[
+                            const Spacer(),
                             sendButton,
-                            const SizedBox(height: 10),
+                            const SizedBox(width: 10),
                             abortButton,
                           ],
                         );
@@ -649,6 +634,8 @@ class _SessionsPageState extends State<_SessionsPage> {
 
                       return Row(
                         children: <Widget>[
+                          Expanded(child: helper),
+                          const SizedBox(width: 12),
                           Expanded(child: sendButton),
                           const SizedBox(width: 12),
                           abortButton,
