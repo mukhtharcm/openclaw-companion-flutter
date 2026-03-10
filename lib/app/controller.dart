@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:openclaw_companion/app/models.dart';
 import 'package:openclaw_companion/app/store.dart';
@@ -529,10 +527,7 @@ class CompanionController extends ChangeNotifier {
       });
     }
 
-    return client.query.chatHistory(
-      sessionKey: sessionKey.trim(),
-      limit: 24,
-    );
+    return client.query.chatHistory(sessionKey: sessionKey.trim(), limit: 24);
   }
 
   Future<void> sendPrompt(String prompt) async {
@@ -767,16 +762,15 @@ class CompanionController extends ChangeNotifier {
   GatewayChatMessage _buildOptimisticUserMessage(String text) {
     return GatewayChatMessage(
       role: 'user',
-      content: <GatewayChatMessageContent>[GatewayChatMessageContent.text(text)],
+      content: <GatewayChatMessageContent>[
+        GatewayChatMessageContent.text(text),
+      ],
       timestamp: DateTime.now().millisecondsSinceEpoch.toDouble(),
       raw: <String, Object?>{
         'role': 'user',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'content': <Object?>[
-          <String, Object?>{
-            'type': 'text',
-            'text': text,
-          },
+          <String, Object?>{'type': 'text', 'text': text},
         ],
       },
     );
@@ -887,14 +881,7 @@ class CompanionController extends ChangeNotifier {
   }
 
   String _summarizeEvent(GatewayEventFrame frame) {
-    if (frame.event == 'chat') {
-      final event = GatewayChatEvent.fromEventFrame(frame);
-      return '${event.sessionKey} · ${event.state}';
-    }
-    if (frame.payload == null) {
-      return '(no payload)';
-    }
-    return _truncate(_pretty(frame.payload), 200);
+    return summarizeGatewayEventFrame(frame);
   }
 
   Future<void> shutdown() async {
@@ -911,22 +898,6 @@ class CompanionController extends ChangeNotifier {
         ? 443
         : 80;
     return 'manual|${uri.host}:$port';
-  }
-}
-
-String _truncate(String value, int maxLength) {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return '${value.substring(0, maxLength - 1)}…';
-}
-
-String _pretty(Object? value) {
-  const encoder = JsonEncoder.withIndent('  ');
-  try {
-    return encoder.convert(value);
-  } catch (_) {
-    return value.toString();
   }
 }
 
