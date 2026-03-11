@@ -7,6 +7,7 @@ void main() {
   test('CompanionConfig round-trips through json', () {
     const config = CompanionConfig(
       manualUrl: 'wss://gateway.example:8443',
+      workspaceMode: CompanionWorkspaceMode.node,
       authMode: CompanionAuthMode.password,
       token: 'unused',
       password: 'secret',
@@ -20,6 +21,7 @@ void main() {
 
     final decoded = CompanionConfig.fromJson(config.toJson());
     expect(decoded.manualUrl, config.manualUrl);
+    expect(decoded.workspaceMode, CompanionWorkspaceMode.node);
     expect(decoded.authMode, config.authMode);
     expect(decoded.password, config.password);
     expect(decoded.autoConnect, isFalse);

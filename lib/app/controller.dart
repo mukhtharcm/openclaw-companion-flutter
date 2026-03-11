@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:openclaw_companion/app/models.dart';
+import 'package:openclaw_companion/app/node_support.dart';
 import 'package:openclaw_companion/app/store.dart';
 import 'package:openclaw_gateway/openclaw_gateway.dart';
 
@@ -21,6 +23,7 @@ class CompanionController extends ChangeNotifier {
   StreamSubscription<GatewayConnectionState>? _connectionSubscription;
   StreamSubscription<GatewayEventFrame>? _eventSubscription;
   StreamSubscription<List<GatewayDiscoveredGateway>>? _discoverySubscription;
+  StreamSubscription<GatewayNodeInvokeRequest>? _nodeInvokeSubscription;
 
   CompanionConfig _config = const CompanionConfig();
   bool _loading = true;
@@ -50,6 +53,11 @@ class CompanionController extends ChangeNotifier {
   List<GatewayChatMessage> _transcript = const <GatewayChatMessage>[];
   List<GatewayDiscoveredGateway> _discoveredGateways =
       const <GatewayDiscoveredGateway>[];
+  GatewayNodeCapabilityRegistry? _nodeRegistry;
+  GatewayNodeConnectSnapshot? _nodeSnapshot;
+  String? _nodePairingRequestId;
+  final List<CompanionNodeInvokeLine> _nodeInvokes =
+      <CompanionNodeInvokeLine>[];
   final List<CompanionEventLine> _eventLines = <CompanionEventLine>[];
   final List<String> _activityLog = <String>[];
 
@@ -86,7 +94,13 @@ class CompanionController extends ChangeNotifier {
   GatewayUsageStatusResult? get usage => _usage;
   GatewayVoiceWakeConfig? get voiceWake => _voiceWake;
   GatewayCronStatusSummary? get cronStatus => _cronStatus;
+  CompanionWorkspaceMode get workspaceMode => _config.workspaceMode;
+  bool get nodeMode => _config.workspaceMode == CompanionWorkspaceMode.node;
   List<GatewayNodeSummary> get nodes => _nodes;
+  GatewayNodeConnectSnapshot? get nodeSnapshot => _nodeSnapshot;
+  String? get nodePairingRequestId => _nodePairingRequestId;
+  List<CompanionNodeInvokeLine> get nodeInvokes =>
+      List.unmodifiable(_nodeInvokes);
   List<GatewayChatMessage> get transcript => _transcript;
   List<GatewayDiscoveredGateway> get discoveredGateways => _discoveredGateways;
   List<CompanionEventLine> get eventLines => List.unmodifiable(_eventLines);
@@ -169,7 +183,10 @@ class CompanionController extends ChangeNotifier {
     await connectManual(url);
   }
 
-  Future<CompanionConfig?> importSetupCode(String raw) async {
+  Future<CompanionConfig?> importSetupCode(
+    String raw, {
+    CompanionWorkspaceMode? workspaceMode,
+  }) async {
     final payload = decodeCompanionSetupPayload(raw);
     if (payload == null) {
       _setError('Setup code is not valid JSON or base64 JSON.');
@@ -189,6 +206,7 @@ class CompanionController extends ChangeNotifier {
         : _config.authMode;
     _config = _config.copyWith(
       manualUrl: uri.toString(),
+      workspaceMode: workspaceMode ?? _config.workspaceMode,
       authMode: nextAuthMode,
       token: payload.token?.trim() ?? _config.token,
       password: payload.password?.trim() ?? _config.password,
@@ -201,6 +219,15 @@ class CompanionController extends ChangeNotifier {
 
   Future<void> setAutoConnect(bool value) async {
     _config = _config.copyWith(autoConnect: value);
+    await _persistConfig();
+    notifyListeners();
+  }
+
+  Future<void> setWorkspaceMode(CompanionWorkspaceMode value) async {
+    if (_config.workspaceMode == value) {
+      return;
+    }
+    _config = _config.copyWith(workspaceMode: value);
     await _persistConfig();
     notifyListeners();
   }
@@ -224,6 +251,7 @@ class CompanionController extends ChangeNotifier {
 
   Future<void> connectManual(
     String url, {
+    CompanionWorkspaceMode? workspaceMode,
     CompanionAuthMode? authMode,
     String? token,
     String? password,
@@ -238,6 +266,7 @@ class CompanionController extends ChangeNotifier {
 
     _config = _config.copyWith(
       manualUrl: trimmed,
+      workspaceMode: workspaceMode ?? _config.workspaceMode,
       authMode: authMode ?? _config.authMode,
       token: token ?? _config.token,
       password: password ?? _config.password,
@@ -250,6 +279,7 @@ class CompanionController extends ChangeNotifier {
       title: uri.host.isEmpty ? trimmed : uri.host,
       uri: uri,
       stableId: _manualStableId(uri),
+      workspaceMode: _config.workspaceMode,
       authMode: _config.authMode,
       token: _config.token,
       password: _config.password,
@@ -260,12 +290,14 @@ class CompanionController extends ChangeNotifier {
 
   Future<void> connectDiscovered(
     GatewayDiscoveredGateway gateway, {
+    CompanionWorkspaceMode? workspaceMode,
     CompanionAuthMode? authMode,
     String? token,
     String? password,
     bool? autoConnect,
   }) async {
     _config = _config.copyWith(
+      workspaceMode: workspaceMode ?? _config.workspaceMode,
       authMode: authMode ?? _config.authMode,
       token: token ?? _config.token,
       password: password ?? _config.password,
@@ -295,6 +327,7 @@ class CompanionController extends ChangeNotifier {
       title: gateway.displayName,
       uri: uri,
       stableId: gateway.stableId,
+      workspaceMode: _config.workspaceMode,
       authMode: _config.authMode,
       token: _config.token,
       password: _config.password,
@@ -380,27 +413,48 @@ class CompanionController extends ChangeNotifier {
     await disconnect(quiet: true);
 
     try {
-      final client = await GatewayClient.connect(
-        uri: request.uri,
-        auth: auth,
-        clientInfo: const GatewayClientInfo(
-          id: GatewayClientIds.gatewayClient,
-          version: '0.1.0',
-          platform: 'flutter',
-          mode: GatewayClientModes.ui,
-          displayName: 'OpenClaw Companion',
-          deviceFamily: 'Companion',
-        ),
-        autoReconnect: true,
-        tlsPolicy: request.uri.scheme == 'wss'
-            ? GatewayTlsPolicy(
-                stableId: request.stableId,
-                fingerprintStore: _authStateStore,
-              )
-            : null,
+      final tlsPolicy = request.uri.scheme == 'wss'
+          ? GatewayTlsPolicy(
+              stableId: request.stableId,
+              fingerprintStore: _authStateStore,
+            )
+          : null;
+      final clientInfo = buildCompanionClientInfo(
+        workspaceMode: request.workspaceMode,
       );
 
+      GatewayClient client;
+      GatewayNodeCapabilityRegistry? nodeRegistry;
+      GatewayNodeConnectSnapshot? nodeSnapshot;
+      if (request.workspaceMode == CompanionWorkspaceMode.node) {
+        nodeRegistry = buildCompanionNodeRegistry();
+        nodeSnapshot = await nodeRegistry.snapshot();
+        final identity = await _authStateStore.readOrCreateIdentity();
+        final options = await nodeRegistry.buildConnectOptions(
+          uri: request.uri,
+          auth: auth,
+          clientInfo: clientInfo,
+          deviceIdentity: identity,
+          deviceTokenStore: _authStateStore,
+          autoReconnect: true,
+          tlsPolicy: tlsPolicy,
+        );
+        client = await GatewayClient.connectWithOptions(options);
+      } else {
+        client = await GatewayClient.connect(
+          uri: request.uri,
+          auth: auth,
+          clientInfo: clientInfo,
+          autoReconnect: true,
+          tlsPolicy: tlsPolicy,
+        );
+      }
+
       _client = client;
+      _nodeRegistry = nodeRegistry;
+      _nodeSnapshot = nodeSnapshot;
+      _nodePairingRequestId = null;
+      _nodeInvokes.clear();
       _serverVersion = client.hello.server.version;
       _connectionState = client.connectionState;
       _connectedGatewayTitle = request.title;
@@ -415,7 +469,11 @@ class CompanionController extends ChangeNotifier {
         }
         if (state.phase == GatewayConnectionPhase.connected) {
           _appendLog('connected to ${request.title}');
-          unawaited(refresh());
+          if (request.workspaceMode == CompanionWorkspaceMode.node) {
+            unawaited(_refreshNodeState(includeLog: false));
+          } else {
+            unawaited(refresh());
+          }
         }
         if (state.error != null) {
           _appendLog('connection error: ${_describeError(state.error!)}');
@@ -424,10 +482,36 @@ class CompanionController extends ChangeNotifier {
       });
 
       _eventSubscription = client.events.listen(_handleEventFrame);
+      if (request.workspaceMode == CompanionWorkspaceMode.node &&
+          nodeRegistry != null) {
+        _nodeInvokeSubscription = client.node.invokeRequests.listen(
+          (invoke) {
+            unawaited(_handleNodeInvoke(client, nodeRegistry!, invoke));
+          },
+        );
+      }
       _appendLog(
-        'connected to ${request.title} (${client.hello.server.version})',
+        'connected to ${request.title} (${request.workspaceMode.label.toLowerCase()} · ${client.hello.server.version})',
       );
-      await refresh();
+      if (request.workspaceMode == CompanionWorkspaceMode.node) {
+        await _refreshNodeState(includeLog: false);
+      } else {
+        await refresh();
+      }
+    } on GatewayResponseException catch (error) {
+      final detailCode = readGatewayConnectErrorDetailCode(error.details);
+      if (request.workspaceMode == CompanionWorkspaceMode.node &&
+          detailCode == GatewayConnectErrorDetailCodes.pairingRequired) {
+        _nodePairingRequestId = _readResponseDetailString(
+          error.details,
+          'requestId',
+        );
+        _setError(
+          'Node pairing required. Approve this companion node from an operator client, then connect again.',
+        );
+      } else {
+        _setError(_describeUnknownError(error));
+      }
     } catch (error) {
       _setError(_describeUnknownError(error));
     } finally {
@@ -440,6 +524,10 @@ class CompanionController extends ChangeNotifier {
     final client = _client;
     if (client == null) {
       _setError('Connect first.');
+      return;
+    }
+    if (nodeMode) {
+      await _refreshNodeState();
       return;
     }
 
@@ -503,6 +591,71 @@ class CompanionController extends ChangeNotifier {
       _busy = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _refreshNodeState({bool includeLog = true}) async {
+    final registry = _nodeRegistry;
+    if (registry == null) {
+      return;
+    }
+
+    _busy = true;
+    _errorText = null;
+    notifyListeners();
+    try {
+      _nodeSnapshot = await registry.snapshot();
+      if (includeLog) {
+        _appendLog('refreshed node state');
+      }
+    } catch (error) {
+      _setError(_describeUnknownError(error));
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _handleNodeInvoke(
+    GatewayClient client,
+    GatewayNodeCapabilityRegistry registry,
+    GatewayNodeInvokeRequest request,
+  ) async {
+    _appendLog('node invoke requested: ${request.command}');
+    final result = await registry.dispatch(client, request);
+    final status = result.ok
+        ? CompanionNodeInvokeStatus.success
+        : CompanionNodeInvokeStatus.error;
+    var summary = _summarizeNodeInvokeResult(result);
+    try {
+      await client.node.sendInvokeResult(
+        id: request.id,
+        nodeId: request.nodeId,
+        ok: result.ok,
+        payload: result.payload,
+        payloadJson: result.payloadJson,
+        error: result.error,
+      );
+    } catch (error) {
+      summary = 'Failed to send node result: ${_describeUnknownError(error)}';
+      _appendLog(summary);
+      _recordNodeInvoke(
+        command: request.command,
+        summary: summary,
+        status: CompanionNodeInvokeStatus.error,
+      );
+      return;
+    }
+
+    _recordNodeInvoke(
+      command: request.command,
+      summary: summary,
+      status: status,
+    );
+    _appendLog(
+      result.ok
+          ? 'node invoke handled: ${request.command}'
+          : 'node invoke failed: ${request.command}',
+    );
   }
 
   Future<void> reloadHistory() async {
@@ -625,7 +778,9 @@ class CompanionController extends ChangeNotifier {
     _pendingTrustPrompt = null;
     _activeStableId = null;
     _autoConnectFired = false;
+    _nodePairingRequestId = null;
     _eventLines.clear();
+    _nodeInvokes.clear();
     _activityLog.clear();
     _appendLog('debug reset: cleared saved app state');
     notifyListeners();
@@ -638,6 +793,8 @@ class CompanionController extends ChangeNotifier {
     _connectionSubscription = null;
     await _eventSubscription?.cancel();
     _eventSubscription = null;
+    await _nodeInvokeSubscription?.cancel();
+    _nodeInvokeSubscription = null;
     if (client != null) {
       await client.close();
       if (!quiet) {
@@ -652,6 +809,10 @@ class CompanionController extends ChangeNotifier {
     _connectionState = const GatewayConnectionState(
       phase: GatewayConnectionPhase.disconnected,
     );
+    _nodeRegistry = null;
+    _nodeSnapshot = null;
+    _nodePairingRequestId = null;
+    _nodeInvokes.clear();
     _health = null;
     _status = null;
     _channelsStatus = null;
@@ -845,6 +1006,41 @@ class CompanionController extends ChangeNotifier {
     return config.copyWith(authMode: CompanionAuthMode.token);
   }
 
+  void _recordNodeInvoke({
+    required String command,
+    required String summary,
+    required CompanionNodeInvokeStatus status,
+  }) {
+    _nodeInvokes.insert(
+      0,
+      CompanionNodeInvokeLine(
+        timeLabel: _clockNow(),
+        command: command,
+        summary: summary,
+        status: status,
+      ),
+    );
+    if (_nodeInvokes.length > 60) {
+      _nodeInvokes.removeRange(60, _nodeInvokes.length);
+    }
+    notifyListeners();
+  }
+
+  String _summarizeNodeInvokeResult(GatewayNodeCommandResult result) {
+    if (!result.ok) {
+      return result.error?.message?.trim().isNotEmpty == true
+          ? result.error!.message!
+          : 'Command failed';
+    }
+    if (result.payload != null) {
+      return summarizeChatValue(result.payload, maxLength: 180);
+    }
+    if (result.payloadJson?.trim().isNotEmpty == true) {
+      return _truncateText(result.payloadJson!, 180);
+    }
+    return 'ok';
+  }
+
   void _setError(String message) {
     _errorText = message;
     _appendLog('error: $message');
@@ -907,6 +1103,24 @@ String _clockNow() {
   final mm = now.minute.toString().padLeft(2, '0');
   final ss = now.second.toString().padLeft(2, '0');
   return '$hh:$mm:$ss';
+}
+
+String _truncateText(String value, int maxLength) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return '${value.substring(0, maxLength - 1)}…';
+}
+
+String? _readResponseDetailString(Object? details, String key) {
+  if (details is! Map<Object?, Object?>) {
+    return null;
+  }
+  final value = details[key]?.toString().trim();
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+  return value;
 }
 
 JsonMap _asJsonMap(Object? value, String context) {

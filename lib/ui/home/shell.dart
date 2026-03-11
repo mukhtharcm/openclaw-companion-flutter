@@ -20,26 +20,12 @@ class _CompanionHomeState extends State<CompanionHome> {
   final TextEditingController _promptController = TextEditingController();
 
   int _selectedSection = 0;
+  CompanionWorkspaceMode _draftWorkspaceMode = CompanionWorkspaceMode.operator;
   CompanionAuthMode _draftAuthMode = CompanionAuthMode.token;
   bool _draftAutoConnect = true;
   String _draftThinking = 'default';
   String _sessionSearchQuery = '';
   String? _shownPromptStableId;
-
-  static const List<_SectionItem> _sections = <_SectionItem>[
-    _SectionItem('Home', Icons.grid_view_outlined, Icons.grid_view_rounded),
-    _SectionItem('Chat', Icons.forum_outlined, Icons.forum_rounded),
-    _SectionItem(
-      'Inspect',
-      Icons.travel_explore_outlined,
-      Icons.travel_explore_rounded,
-    ),
-    _SectionItem(
-      'Logs',
-      Icons.receipt_long_outlined,
-      Icons.receipt_long_rounded,
-    ),
-  ];
 
   @override
   void initState() {
@@ -65,17 +51,24 @@ class _CompanionHomeState extends State<CompanionHome> {
     _tokenController.text = config.token;
     _passwordController.text = config.password;
     _sessionController.text = config.preferredSessionKey;
+    _draftWorkspaceMode = config.workspaceMode;
     _draftAuthMode = config.authMode == CompanionAuthMode.none
         ? CompanionAuthMode.token
         : config.authMode;
     _draftAutoConnect = config.autoConnect;
     _draftThinking = config.thinking;
+    final sectionCount =
+        _CompanionHomeSections.sectionsFor(config.workspaceMode).length;
+    if (_selectedSection >= sectionCount) {
+      _selectedSection = 0;
+    }
   }
 
   Future<void> _connectManual() async {
     final hadPrompt = widget.controller.pendingTrustPrompt != null;
     await widget.controller.connectManual(
       _urlController.text,
+      workspaceMode: _draftWorkspaceMode,
       authMode: _draftAuthMode,
       token: _tokenController.text,
       password: _passwordController.text,
@@ -91,6 +84,7 @@ class _CompanionHomeState extends State<CompanionHome> {
     final hadPrompt = widget.controller.pendingTrustPrompt != null;
     final config = await widget.controller.importSetupCode(
       _setupCodeController.text,
+      workspaceMode: _draftWorkspaceMode,
     );
     if (config == null || !mounted) {
       return;
@@ -109,9 +103,15 @@ class _CompanionHomeState extends State<CompanionHome> {
       urlController: _urlController,
       tokenController: _tokenController,
       passwordController: _passwordController,
+      workspaceMode: _draftWorkspaceMode,
       authMode: _draftAuthMode,
       embedded: embedded,
       autoConnect: _draftAutoConnect,
+      onWorkspaceModeChanged: (value) {
+        setState(() {
+          _draftWorkspaceMode = value;
+        });
+      },
       onAuthModeChanged: (value) {
         setState(() {
           _draftAuthMode = value;
@@ -130,6 +130,7 @@ class _CompanionHomeState extends State<CompanionHome> {
           final hadPrompt = widget.controller.pendingTrustPrompt != null;
           await widget.controller.connectDiscovered(
             gateway,
+            workspaceMode: _draftWorkspaceMode,
             authMode: _draftAuthMode,
             token: _tokenController.text,
             password: _passwordController.text,
@@ -324,6 +325,12 @@ class _CompanionHomeState extends State<CompanionHome> {
       builder: (context, _) {
         final controller = widget.controller;
         _maybeShowTrustPrompt(controller);
+        final sections = _CompanionHomeSections.sectionsFor(
+          controller.workspaceMode,
+        );
+        final selectedSection = _selectedSection >= sections.length
+            ? 0
+            : _selectedSection;
 
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -331,7 +338,8 @@ class _CompanionHomeState extends State<CompanionHome> {
 
             final body = _CompanionBody(
               controller: controller,
-              selectedSection: _selectedSection,
+              selectedSection: selectedSection,
+              sections: sections,
               compact: !desktop,
               sessionController: _sessionController,
               sessionSearchController: _sessionSearchController,
@@ -393,7 +401,8 @@ class _CompanionHomeState extends State<CompanionHome> {
                       children: <Widget>[
                         _DesktopSidebar(
                           controller: controller,
-                          selectedSection: _selectedSection,
+                          selectedSection: selectedSection,
+                          sections: sections,
                           onOpenConnections: () =>
                               unawaited(_openConnectionsPanel(desktop: true)),
                           onSectionSelected: (value) {
@@ -415,13 +424,16 @@ class _CompanionHomeState extends State<CompanionHome> {
               );
             }
 
+            final compactChatPage =
+                controller.workspaceMode == CompanionWorkspaceMode.operator &&
+                selectedSection == 1;
             return Scaffold(
               body: SafeArea(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
-                    _selectedSection == 1 ? 12 : 16,
-                    _selectedSection == 1 ? 10 : 16,
-                    _selectedSection == 1 ? 12 : 16,
+                    compactChatPage ? 12 : 16,
+                    compactChatPage ? 10 : 16,
+                    compactChatPage ? 12 : 16,
                     0,
                   ),
                   child: body,
@@ -432,8 +444,8 @@ class _CompanionHomeState extends State<CompanionHome> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                   child: _CompactNavBar(
-                    selectedIndex: _selectedSection,
-                    items: _sections,
+                    selectedIndex: selectedSection,
+                    items: sections,
                     onSelected: (value) {
                       setState(() {
                         _selectedSection = value;
@@ -454,12 +466,14 @@ class _DesktopSidebar extends StatelessWidget {
   const _DesktopSidebar({
     required this.controller,
     required this.selectedSection,
+    required this.sections,
     required this.onOpenConnections,
     required this.onSectionSelected,
   });
 
   final CompanionController controller;
   final int selectedSection;
+  final List<_SectionItem> sections;
   final VoidCallback onOpenConnections;
   final ValueChanged<int> onSectionSelected;
 
@@ -509,13 +523,16 @@ class _DesktopSidebar extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                controller.connectedGatewayTitle ?? 'Operator workspace',
+                controller.connectedGatewayTitle ??
+                    (controller.workspaceMode == CompanionWorkspaceMode.node
+                        ? 'Node workspace'
+                        : 'Operator workspace'),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: const Color(0xFF96AAA3),
                 ),
               ),
               const SizedBox(height: 20),
-              ..._CompanionHomeSections.sections.indexed.map((entry) {
+              ...sections.indexed.map((entry) {
                 final index = entry.$1;
                 final item = entry.$2;
                 return Padding(
@@ -684,18 +701,52 @@ class _CompactNavBar extends StatelessWidget {
 }
 
 class _CompanionHomeSections {
-  static const List<_SectionItem> sections = <_SectionItem>[
-    _SectionItem('Home', Icons.grid_view_outlined, Icons.grid_view_rounded),
-    _SectionItem('Chat', Icons.forum_outlined, Icons.forum_rounded),
+  static const List<_SectionItem> operatorSections = <_SectionItem>[
+    _SectionItem(
+      'Home',
+      Icons.grid_view_outlined,
+      Icons.grid_view_rounded,
+      subtitle: 'Gateway status, session volume, and recent activity.',
+    ),
+    _SectionItem(
+      'Chat',
+      Icons.forum_outlined,
+      Icons.forum_rounded,
+      subtitle: 'Stay in one session, review history, and send prompts quickly.',
+    ),
     _SectionItem(
       'Inspect',
       Icons.travel_explore_outlined,
       Icons.travel_explore_rounded,
+      subtitle: 'Inspect channels, models, tools, and paired nodes.',
     ),
     _SectionItem(
       'Logs',
       Icons.receipt_long_outlined,
       Icons.receipt_long_rounded,
+      subtitle: 'Watch live gateway events and the local activity log.',
     ),
   ];
+
+  static const List<_SectionItem> nodeSections = <_SectionItem>[
+    _SectionItem(
+      'Node',
+      Icons.developer_board_outlined,
+      Icons.developer_board_rounded,
+      subtitle: 'Expose declared commands and review recent node invokes.',
+    ),
+    _SectionItem(
+      'Logs',
+      Icons.receipt_long_outlined,
+      Icons.receipt_long_rounded,
+      subtitle: 'Watch live gateway events and the local activity log.',
+    ),
+  ];
+
+  static List<_SectionItem> sectionsFor(CompanionWorkspaceMode mode) {
+    return switch (mode) {
+      CompanionWorkspaceMode.operator => operatorSections,
+      CompanionWorkspaceMode.node => nodeSections,
+    };
+  }
 }

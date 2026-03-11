@@ -7,9 +7,11 @@ class _ConnectionPanel extends StatelessWidget {
     required this.urlController,
     required this.tokenController,
     required this.passwordController,
+    required this.workspaceMode,
     required this.authMode,
     required this.embedded,
     required this.autoConnect,
+    required this.onWorkspaceModeChanged,
     required this.onAuthModeChanged,
     required this.onAutoConnectChanged,
     required this.onImportSetupCode,
@@ -26,9 +28,11 @@ class _ConnectionPanel extends StatelessWidget {
   final TextEditingController urlController;
   final TextEditingController tokenController;
   final TextEditingController passwordController;
+  final CompanionWorkspaceMode workspaceMode;
   final CompanionAuthMode authMode;
   final bool embedded;
   final bool autoConnect;
+  final ValueChanged<CompanionWorkspaceMode> onWorkspaceModeChanged;
   final ValueChanged<CompanionAuthMode> onAuthModeChanged;
   final ValueChanged<bool> onAutoConnectChanged;
   final Future<void> Function() onImportSetupCode;
@@ -54,6 +58,9 @@ class _ConnectionPanel extends StatelessWidget {
       _ when controller.busy => 'Working on your connection',
       _ => null,
     };
+    final connectLabel = workspaceMode == CompanionWorkspaceMode.node
+        ? 'Connect as node'
+        : 'Connect';
 
     final panel = Column(
       children: <Widget>[
@@ -77,7 +84,7 @@ class _ConnectionPanel extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Import, discover, or connect manually. Saved auth and TLS trust are reused automatically.',
+                        'Import, discover, or connect manually. Saved auth, identity, and TLS trust are reused automatically.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: const Color(0xFF5E706B),
                         ),
@@ -146,6 +153,7 @@ class _ConnectionPanel extends StatelessWidget {
                                   child: _DiscoveredGatewayTile(
                                     gateway: gateway,
                                     busy: controller.busy,
+                                    connectLabel: connectLabel,
                                     onConnect: () =>
                                         onConnectDiscovered(gateway),
                                   ),
@@ -160,9 +168,45 @@ class _ConnectionPanel extends StatelessWidget {
                 _SheetSection(
                   title: 'Manual connection',
                   subtitle:
-                      'Use a direct gateway URL for local, remote, or tunneled setups.',
+                      'Choose operator or node mode, then use a direct URL for local, remote, or tunneled setups.',
                   child: Column(
                     children: <Widget>[
+                      SegmentedButton<CompanionWorkspaceMode>(
+                        segments: CompanionWorkspaceMode.values
+                            .map(
+                              (mode) =>
+                                  ButtonSegment<CompanionWorkspaceMode>(
+                                    value: mode,
+                                    label: Text(mode.label),
+                                  ),
+                            )
+                            .toList(growable: false),
+                        selected: <CompanionWorkspaceMode>{workspaceMode},
+                        onSelectionChanged: (value) {
+                          onWorkspaceModeChanged(value.first);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          workspaceMode.description,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF5E706B),
+                          ),
+                        ),
+                      ),
+                      if (workspaceMode == CompanionWorkspaceMode.node) ...<
+                        Widget
+                      >[
+                        const SizedBox(height: 12),
+                        const _HintCard(
+                          text:
+                              'The first node connect may require approval from an operator client. This companion currently exposes a small safe desktop command set.',
+                          tint: Color(0xFFF4EEE3),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
                       TextField(
                         controller: urlController,
                         decoration: const InputDecoration(
@@ -274,7 +318,7 @@ class _ConnectionPanel extends StatelessWidget {
                         : () {
                             unawaited(onConnectManual());
                           },
-                    child: Text(controller.busy ? 'Working…' : 'Connect'),
+                    child: Text(controller.busy ? 'Working…' : connectLabel),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -441,11 +485,13 @@ class _DiscoveredGatewayTile extends StatelessWidget {
   const _DiscoveredGatewayTile({
     required this.gateway,
     required this.busy,
+    required this.connectLabel,
     required this.onConnect,
   });
 
   final GatewayDiscoveredGateway gateway;
   final bool busy;
+  final String connectLabel;
   final VoidCallback onConnect;
 
   @override
@@ -474,7 +520,7 @@ class _DiscoveredGatewayTile extends StatelessWidget {
             const SizedBox(height: 10),
             FilledButton.tonal(
               onPressed: busy ? null : onConnect,
-              child: const Text('Connect'),
+              child: Text(connectLabel),
             ),
           ],
         ),

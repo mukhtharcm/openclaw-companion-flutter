@@ -4,6 +4,31 @@ import 'package:openclaw_gateway/openclaw_gateway.dart';
 
 enum CompanionAuthMode { token, password, none }
 
+enum CompanionWorkspaceMode { operator, node }
+
+extension CompanionWorkspaceModeLabel on CompanionWorkspaceMode {
+  String get storageValue => name;
+
+  String get label => switch (this) {
+    CompanionWorkspaceMode.operator => 'Operator',
+    CompanionWorkspaceMode.node => 'Node',
+  };
+
+  String get description => switch (this) {
+    CompanionWorkspaceMode.operator =>
+      'Chat, inspect, and manage the gateway.',
+    CompanionWorkspaceMode.node =>
+      'Expose local companion commands as a paired node.',
+  };
+
+  static CompanionWorkspaceMode fromStorage(String? raw) {
+    return CompanionWorkspaceMode.values.firstWhere(
+      (mode) => mode.storageValue == raw,
+      orElse: () => CompanionWorkspaceMode.operator,
+    );
+  }
+}
+
 extension CompanionAuthModeLabel on CompanionAuthMode {
   String get storageValue => name;
 
@@ -79,6 +104,7 @@ class CompanionLastConnection {
 class CompanionConfig {
   const CompanionConfig({
     this.manualUrl = '',
+    this.workspaceMode = CompanionWorkspaceMode.operator,
     this.authMode = CompanionAuthMode.token,
     this.token = '',
     this.password = '',
@@ -91,6 +117,9 @@ class CompanionConfig {
   factory CompanionConfig.fromJson(JsonMap json) {
     return CompanionConfig(
       manualUrl: _readNullableString(json['manualUrl']) ?? '',
+      workspaceMode: CompanionWorkspaceModeLabel.fromStorage(
+        _readNullableString(json['workspaceMode']),
+      ),
       authMode: CompanionAuthModeLabel.fromStorage(
         _readNullableString(json['authMode']),
       ),
@@ -112,6 +141,7 @@ class CompanionConfig {
   }
 
   final String manualUrl;
+  final CompanionWorkspaceMode workspaceMode;
   final CompanionAuthMode authMode;
   final String token;
   final String password;
@@ -123,6 +153,7 @@ class CompanionConfig {
   JsonMap toJson() {
     return <String, Object?>{
       'manualUrl': manualUrl,
+      'workspaceMode': workspaceMode.storageValue,
       'authMode': authMode.storageValue,
       'token': token,
       'password': password,
@@ -135,6 +166,7 @@ class CompanionConfig {
 
   CompanionConfig copyWith({
     String? manualUrl,
+    CompanionWorkspaceMode? workspaceMode,
     CompanionAuthMode? authMode,
     String? token,
     String? password,
@@ -145,6 +177,7 @@ class CompanionConfig {
   }) {
     return CompanionConfig(
       manualUrl: manualUrl ?? this.manualUrl,
+      workspaceMode: workspaceMode ?? this.workspaceMode,
       authMode: authMode ?? this.authMode,
       token: token ?? this.token,
       password: password ?? this.password,
@@ -261,6 +294,7 @@ class CompanionConnectionRequest {
     required this.title,
     required this.uri,
     required this.stableId,
+    required this.workspaceMode,
     required this.authMode,
     required this.token,
     required this.password,
@@ -270,6 +304,7 @@ class CompanionConnectionRequest {
   final String title;
   final Uri uri;
   final String stableId;
+  final CompanionWorkspaceMode workspaceMode;
   final CompanionAuthMode authMode;
   final String token;
   final String password;
@@ -286,6 +321,22 @@ class CompanionEventLine {
   final String timeLabel;
   final String name;
   final String summary;
+}
+
+enum CompanionNodeInvokeStatus { pending, success, error }
+
+class CompanionNodeInvokeLine {
+  const CompanionNodeInvokeLine({
+    required this.timeLabel,
+    required this.command,
+    required this.summary,
+    required this.status,
+  });
+
+  final String timeLabel;
+  final String command;
+  final String summary;
+  final CompanionNodeInvokeStatus status;
 }
 
 JsonMap _asJsonMap(Object? value, String context) {

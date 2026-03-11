@@ -4,14 +4,13 @@ Flutter companion app for the OpenClaw gateway.
 
 Current scope:
 
-- operator-side gateway session only
+- operator and minimal node workspace modes
 - persisted manual endpoint + auth config
-- persisted shared auth and TLS fingerprints
+- persisted shared auth, paired node identity, device tokens, and TLS fingerprints
 - local Bonjour/mDNS discovery
 - first-use TLS trust prompt for `wss://` endpoints
 - sessions list, chat history, chat send, live chat/event feed
-
-Node mode is intentionally not included yet.
+- node-mode pairing plus a small desktop command set (`system.notify`, `device.status` on macOS)
 
 ## Run
 
@@ -56,9 +55,11 @@ You can connect in three ways:
 For `wss://` connections, the app will show a trust prompt the first time it
 sees a gateway fingerprint and then pin it for later reconnects.
 
-By default the companion connects like the SDK example app: shared token or
-password auth for an operator session. It does not use pairable device auth in
-the normal flow.
+Operator mode uses the simpler shared token or password flow.
+
+Node mode reuses the same shared auth for the first connect, then creates a
+paired device identity and cached device token for later reconnects. The first
+node connect may require approval from an operator client.
 
 In debug builds, the Connections panel also exposes a `Reset app state` action
 that clears saved config, auth, and trusted TLS fingerprints so first-run flows

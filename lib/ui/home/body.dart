@@ -4,6 +4,7 @@ class _CompanionBody extends StatelessWidget {
   const _CompanionBody({
     required this.controller,
     required this.selectedSection,
+    required this.sections,
     required this.compact,
     required this.sessionController,
     required this.sessionSearchController,
@@ -23,6 +24,7 @@ class _CompanionBody extends StatelessWidget {
 
   final CompanionController controller;
   final int selectedSection;
+  final List<_SectionItem> sections;
   final bool compact;
   final TextEditingController sessionController;
   final TextEditingController sessionSearchController;
@@ -41,20 +43,17 @@ class _CompanionBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final page = _CompanionHomeSections.sections[selectedSection];
-    final compactChat = compact && selectedSection == 1;
+    final page = sections[selectedSection];
+    final compactChat =
+        controller.workspaceMode == CompanionWorkspaceMode.operator &&
+        compact &&
+        selectedSection == 1;
     final showPageHeader =
         !compactChat || controller.needsInitialConnectionSetup;
     final showCompactChatBanner =
         compactChat &&
         !controller.needsInitialConnectionSetup &&
         (!controller.connected || controller.errorText != null);
-    final subtitle = switch (selectedSection) {
-      0 => 'Gateway status, session volume, and recent activity.',
-      1 => 'Stay in one session, review history, and send prompts quickly.',
-      2 => 'Inspect channels, models, tools, and paired nodes.',
-      _ => 'Watch live gateway events and the local activity log.',
-    };
     final loadingLabel = switch (controller.connectionState.phase) {
       GatewayConnectionPhase.connecting => 'Connecting to the gateway',
       GatewayConnectionPhase.reconnecting => 'Reconnecting to the gateway',
@@ -67,7 +66,7 @@ class _CompanionBody extends StatelessWidget {
         if (showPageHeader) ...<Widget>[
           _PageHeader(
             title: page.label,
-            subtitle: subtitle,
+            subtitle: page.subtitle,
             gatewayLabel: controller.connectedGatewayTitle,
             connectionState: controller.connectionState,
             errorText: controller.errorText,
@@ -95,26 +94,32 @@ class _CompanionBody extends StatelessWidget {
         Expanded(
           child: controller.needsInitialConnectionSetup
               ? _FirstRunPrompt(
+                  workspaceMode: controller.workspaceMode,
                   discoveredGateways: controller.discoveredGateways,
                   onOpenConnections: onOpenConnections,
                 )
+              : controller.workspaceMode == CompanionWorkspaceMode.node
+              ? switch (selectedSection) {
+                  0 => _NodePage(controller: controller),
+                  _ => _EventsPage(controller: controller),
+                }
               : switch (selectedSection) {
                   0 => _OverviewPage(controller: controller),
                   1 => _SessionsPage(
-                    controller: controller,
-                    sessionController: sessionController,
-                    sessionSearchController: sessionSearchController,
-                    promptController: promptController,
-                    sessionSearchQuery: sessionSearchQuery,
-                    thinking: thinking,
-                    onThinkingChanged: onThinkingChanged,
-                    onSessionChanged: onSessionChanged,
-                    onSessionSearchChanged: onSessionSearchChanged,
-                    onSessionSelected: onSessionSelected,
-                    onReloadHistory: onReloadHistory,
-                    onSendPrompt: onSendPrompt,
-                    onAbortRun: onAbortRun,
-                  ),
+                      controller: controller,
+                      sessionController: sessionController,
+                      sessionSearchController: sessionSearchController,
+                      promptController: promptController,
+                      sessionSearchQuery: sessionSearchQuery,
+                      thinking: thinking,
+                      onThinkingChanged: onThinkingChanged,
+                      onSessionChanged: onSessionChanged,
+                      onSessionSearchChanged: onSessionSearchChanged,
+                      onSessionSelected: onSessionSelected,
+                      onReloadHistory: onReloadHistory,
+                      onSendPrompt: onSendPrompt,
+                      onAbortRun: onAbortRun,
+                    ),
                   2 => _ExplorePage(controller: controller),
                   _ => _EventsPage(controller: controller),
                 },
@@ -126,10 +131,12 @@ class _CompanionBody extends StatelessWidget {
 
 class _FirstRunPrompt extends StatelessWidget {
   const _FirstRunPrompt({
+    required this.workspaceMode,
     required this.discoveredGateways,
     required this.onOpenConnections,
   });
 
+  final CompanionWorkspaceMode workspaceMode;
   final List<GatewayDiscoveredGateway> discoveredGateways;
   final VoidCallback onOpenConnections;
 
@@ -161,7 +168,9 @@ class _FirstRunPrompt extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  'Connect to a gateway first',
+                  workspaceMode == CompanionWorkspaceMode.node
+                      ? 'Connect this node first'
+                      : 'Connect to a gateway first',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -169,7 +178,11 @@ class _FirstRunPrompt extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   discoveredGateways.isEmpty
-                      ? 'Import a setup code or enter a gateway URL to start using the companion app.'
+                      ? workspaceMode == CompanionWorkspaceMode.node
+                          ? 'Open Connections to pair this companion as a node. A shared gateway token or password is still required for the first connect.'
+                          : 'Import a setup code or enter a gateway URL to start using the companion app.'
+                      : workspaceMode == CompanionWorkspaceMode.node
+                      ? 'A local gateway was discovered. Open Connections to connect as a node host, or enter a manual URL.'
                       : 'A local gateway was discovered. Open Connections to use it, or enter a manual URL.',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: const Color(0xFF4A665F),

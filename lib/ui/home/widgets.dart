@@ -883,9 +883,15 @@ class _InfoLine extends StatelessWidget {
 }
 
 class _SectionItem {
-  const _SectionItem(this.label, this.icon, this.selectedIcon);
+  const _SectionItem(
+    this.label,
+    this.icon,
+    this.selectedIcon, {
+    required this.subtitle,
+  });
 
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+  final String subtitle;
 }

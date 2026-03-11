@@ -11,5 +11,6 @@ part 'home/shell.dart';
 part 'home/body.dart';
 part 'home/connection.dart';
 part 'home/chat_page.dart';
+part 'home/node_page.dart';
 part 'home/widgets.dart';
 part 'home/chat_widgets.dart';
