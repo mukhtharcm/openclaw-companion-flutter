@@ -96,7 +96,10 @@ class _CompanionHomeState extends State<CompanionHome> {
     _maybeCloseConnectionsPanel(hadPrompt: hadPrompt);
   }
 
-  Widget _buildConnectionPanel({required bool embedded}) {
+  Widget _buildConnectionPanel({
+    required bool embedded,
+    VoidCallback? onPanelChanged,
+  }) {
     return _ConnectionPanel(
       controller: widget.controller,
       setupCodeController: _setupCodeController,
@@ -111,19 +114,25 @@ class _CompanionHomeState extends State<CompanionHome> {
         setState(() {
           _draftWorkspaceMode = value;
         });
+        onPanelChanged?.call();
       },
       onAuthModeChanged: (value) {
         setState(() {
           _draftAuthMode = value;
         });
+        onPanelChanged?.call();
       },
       onAutoConnectChanged: (value) {
         setState(() {
           _draftAutoConnect = value;
         });
+        onPanelChanged?.call();
         unawaited(widget.controller.setAutoConnect(value));
       },
-      onImportSetupCode: _importSetupCode,
+      onImportSetupCode: () async {
+        await _importSetupCode();
+        onPanelChanged?.call();
+      },
       onConnectManual: _connectManual,
       onConnectDiscovered: (gateway) {
         unawaited(() async {
@@ -154,6 +163,7 @@ class _CompanionHomeState extends State<CompanionHome> {
           _passwordController.clear();
           _draftAuthMode = CompanionAuthMode.token;
         });
+        onPanelChanged?.call();
       },
       onResetAllDebug: () async {
         await widget.controller.resetAllState();
@@ -172,6 +182,7 @@ class _CompanionHomeState extends State<CompanionHome> {
           _promptController.clear();
           _applyConfig(widget.controller.config);
         });
+        onPanelChanged?.call();
       },
     );
   }
@@ -180,10 +191,22 @@ class _CompanionHomeState extends State<CompanionHome> {
     if (!mounted) {
       return;
     }
-    final sheet = _ConnectionsSheet(
-      desktop: desktop,
-      child: _buildConnectionPanel(embedded: true),
-    );
+    Widget buildSheet(StateSetter? setSheetState) {
+      return ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) {
+          return _ConnectionsSheet(
+            desktop: desktop,
+            child: _buildConnectionPanel(
+              embedded: true,
+              onPanelChanged: setSheetState == null
+                  ? null
+                  : () => setSheetState(() {}),
+            ),
+          );
+        },
+      );
+    }
     if (desktop) {
       await showGeneralDialog<void>(
         context: context,
@@ -192,24 +215,28 @@ class _CompanionHomeState extends State<CompanionHome> {
         barrierColor: const Color(0x33000000),
         transitionDuration: const Duration(milliseconds: 220),
         pageBuilder: (context, animation, secondaryAnimation) {
-          return Material(
-            type: MaterialType.transparency,
-            child: SafeArea(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 440,
-                      minWidth: 380,
-                      maxHeight: double.infinity,
+          return StatefulBuilder(
+            builder: (context, setSheetState) {
+              return Material(
+                type: MaterialType.transparency,
+                child: SafeArea(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: 440,
+                          minWidth: 380,
+                          maxHeight: double.infinity,
+                        ),
+                        child: buildSheet(setSheetState),
+                      ),
                     ),
-                    child: sheet,
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           );
         },
         transitionBuilder: (context, animation, secondaryAnimation, child) {
@@ -235,9 +262,16 @@ class _CompanionHomeState extends State<CompanionHome> {
       backgroundColor: Colors.transparent,
       builder: (context) {
         final viewInsets = MediaQuery.of(context).viewInsets;
-        return Padding(
-          padding: EdgeInsets.only(bottom: viewInsets.bottom),
-          child: FractionallySizedBox(heightFactor: 0.92, child: sheet),
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: viewInsets.bottom),
+              child: FractionallySizedBox(
+                heightFactor: 0.92,
+                child: buildSheet(setSheetState),
+              ),
+            );
+          },
         );
       },
     );
