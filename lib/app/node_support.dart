@@ -44,20 +44,20 @@ List<CompanionNodeCommandDescriptor> buildCompanionNodeCommandCatalog() {
       isAvailable: _supportsDesktopSystemCommands,
       handler: _handleSystemWhich,
     ),
-    if (Platform.isMacOS)
-      CompanionNodeCommandDescriptor(
-        name: 'device.status',
-        summary: 'Report runtime and environment details for this Mac node.',
-        capabilities: const <String>['device'],
-        handler: _handleDeviceStatus,
-      ),
-    if (Platform.isMacOS)
-      CompanionNodeCommandDescriptor(
-        name: 'device.info',
-        summary: 'Describe the current Mac host and companion app build.',
-        capabilities: const <String>['device'],
-        handler: _handleDeviceInfo,
-      ),
+    CompanionNodeCommandDescriptor(
+      name: 'device.status',
+      summary: 'Report runtime and environment details for this desktop node.',
+      capabilities: const <String>['device'],
+      isAvailable: _supportsDesktopDeviceCommands,
+      handler: _handleDeviceStatus,
+    ),
+    CompanionNodeCommandDescriptor(
+      name: 'device.info',
+      summary: 'Describe the current desktop host and companion app build.',
+      capabilities: const <String>['device'],
+      isAvailable: _supportsDesktopDeviceCommands,
+      handler: _handleDeviceInfo,
+    ),
   ];
 }
 
@@ -69,14 +69,17 @@ GatewayNodeCapabilityRegistry buildCompanionNodeRegistry() {
         name: 'system',
         isEnabled: _supportsDesktopSystemCommands,
       ),
-      if (Platform.isMacOS) const GatewayNodeCapability(name: 'device'),
+      GatewayNodeCapability(
+        name: 'device',
+        isEnabled: _supportsDesktopDeviceCommands,
+      ),
     ],
     commands: commandCatalog
         .map((command) => command.toGatewayCommand())
         .toList(growable: false),
     permissionsResolver: () async => <String, bool>{
       'notifications': await _supportsDesktopSystemCommands(),
-      'device': Platform.isMacOS,
+      'device': await _supportsDesktopDeviceCommands(),
     },
   );
 }
@@ -128,6 +131,10 @@ Map<String, String> resolveCompanionSystemBins(
 }
 
 Future<bool> _supportsDesktopSystemCommands() async {
+  return Platform.isMacOS || Platform.isLinux || Platform.isWindows;
+}
+
+Future<bool> _supportsDesktopDeviceCommands() async {
   return Platform.isMacOS || Platform.isLinux || Platform.isWindows;
 }
 

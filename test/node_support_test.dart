@@ -13,17 +13,14 @@ void main() {
 
     expect(names, contains('system.notify'));
     expect(names, contains('system.which'));
+    expect(names, containsAll(<String>['device.info', 'device.status']));
     expect(snapshot.commands, contains('system.notify'));
     expect(snapshot.commands, contains('system.which'));
-
-    if (Platform.isMacOS) {
-      expect(names, containsAll(<String>['device.info', 'device.status']));
-      expect(snapshot.capabilities, contains('device'));
-    } else {
-      expect(names, isNot(contains('device.info')));
-      expect(names, isNot(contains('device.status')));
-      expect(snapshot.capabilities, isNot(contains('device')));
-    }
+    expect(
+      snapshot.commands,
+      containsAll(<String>['device.info', 'device.status']),
+    );
+    expect(snapshot.capabilities, contains('device'));
   });
 
   test('system.which resolver finds executables in a custom PATH', () async {

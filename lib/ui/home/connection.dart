@@ -218,7 +218,7 @@ class _ConnectionPanel extends StatelessWidget {
                         const SizedBox(height: 12),
                         _HintCard(
                           text:
-                              'The first node connect may require approval from an operator client. This build keeps the baseline small and safe.',
+                              'The first node connect may require approval from an operator client. This build keeps the baseline small and safe. On Linux and Windows, `device.*` commands may need `gateway.nodes.allowCommands` before the gateway will invoke them.',
                           tint: const Color(0xFFF4EEE3),
                         ),
                         const SizedBox(height: 10),

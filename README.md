@@ -10,7 +10,7 @@ Current scope:
 - local Bonjour/mDNS discovery
 - first-use TLS trust prompt for `wss://` endpoints
 - sessions list, chat history, chat send, live chat/event feed
-- node-mode pairing plus a small desktop baseline (`system.notify`, `system.which`, and `device.info` / `device.status` on macOS)
+- node-mode pairing plus a small desktop baseline (`system.notify`, `system.which`, `device.info`, `device.status`)
 
 ## Run
 

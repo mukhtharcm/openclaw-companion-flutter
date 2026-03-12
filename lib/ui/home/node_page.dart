@@ -379,7 +379,7 @@ String _nodeCapabilitySummary(String capability) {
     'system' =>
       'Desktop-safe system helpers such as notifications and PATH lookup.',
     'device' =>
-      'Basic host identity and runtime details for macOS node sessions.',
+      'Basic host identity and runtime details. Linux and Windows may require a gateway allowlist override.',
     _ => 'Declared by this companion node.',
   };
 }
