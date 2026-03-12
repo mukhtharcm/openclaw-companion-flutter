@@ -603,34 +603,64 @@ class _CommandSnippet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF162220),
+    return Material(
+      color: const Color(0xFF162220),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
         borderRadius: BorderRadius.circular(16),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              title,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: const Color(0xFFD4E0DC),
-                fontWeight: FontWeight.w700,
+        onTap: () => _copyCommand(context),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFFD4E0DC),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy command',
+                    onPressed: () => _copyCommand(context),
+                    icon: const Icon(
+                      Icons.content_copy_rounded,
+                      size: 18,
+                      color: Color(0xFFD4E0DC),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 10),
-            SelectableText(
-              command,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.white,
-                fontFamily: 'monospace',
-                height: 1.45,
+              const SizedBox(height: 6),
+              SelectableText(
+                command,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  height: 1.45,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _copyCommand(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: command));
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied command to clipboard'),
+        duration: Duration(seconds: 2),
       ),
     );
   }
