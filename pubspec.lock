@@ -272,7 +272,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "9eb8359a24d097fe1058654e2cfa49dcc464ca47"
+      resolved-ref: "450f28902c5b16d0264c18df571f1f67fa876023"
       url: "https://github.com/mukhtharcm/openclaw-gateway-dart.git"
     source: git
     version: "0.1.0"
