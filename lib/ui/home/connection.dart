@@ -58,7 +58,12 @@ class _ConnectionPanel extends StatelessWidget {
       _ when controller.busy => 'Working on your connection',
       _ => null,
     };
-    final connectLabel = workspaceMode == CompanionWorkspaceMode.node
+    final pairRequestId = workspaceMode == CompanionWorkspaceMode.node
+        ? controller.nodePairingRequestId
+        : null;
+    final connectLabel = pairRequestId != null
+        ? 'Reconnect after approval'
+        : workspaceMode == CompanionWorkspaceMode.node
         ? 'Connect as node'
         : 'Connect';
 
@@ -108,6 +113,19 @@ class _ConnectionPanel extends StatelessWidget {
                   _LoadingBanner(
                     label: connectionLabel,
                     detail: controller.connectedGatewayTitle,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (pairRequestId != null) ...<Widget>[
+                  _SheetSection(
+                    title: 'Pairing approval required',
+                    subtitle:
+                        'Approve this pending node device request from an operator client, then reconnect.',
+                    child: _PairingApprovalCard(
+                      requestId: pairRequestId,
+                      url: urlController.text.trim(),
+                      authMode: visibleAuthMode,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -527,4 +545,117 @@ class _DiscoveredGatewayTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PairingApprovalCard extends StatelessWidget {
+  const _PairingApprovalCard({
+    required this.requestId,
+    required this.url,
+    required this.authMode,
+  });
+
+  final String requestId;
+  final String url;
+  final CompanionAuthMode authMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final hostCommand = 'openclaw devices approve $requestId';
+    final remoteCommand = _buildRemoteApproveCommand(
+      requestId: requestId,
+      url: url,
+      authMode: authMode,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _HintCard(
+          text:
+              'Pending request: $requestId. Approve it from any operator session, then come back here and reconnect.',
+          tint: const Color(0xFFF4EEE3),
+        ),
+        const SizedBox(height: 12),
+        _CommandSnippet(
+          title: 'On the gateway host',
+          command: hostCommand,
+        ),
+        if (remoteCommand != null) ...<Widget>[
+          const SizedBox(height: 12),
+          _CommandSnippet(
+            title: 'From another machine with explicit gateway access',
+            command: remoteCommand,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CommandSnippet extends StatelessWidget {
+  const _CommandSnippet({
+    required this.title,
+    required this.command,
+  });
+
+  final String title;
+  final String command;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF162220),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: const Color(0xFFD4E0DC),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            SelectableText(
+              command,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.white,
+                fontFamily: 'monospace',
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String? _buildRemoteApproveCommand({
+  required String requestId,
+  required String url,
+  required CompanionAuthMode authMode,
+}) {
+  final trimmedUrl = url.trim();
+  if (trimmedUrl.isEmpty) {
+    return null;
+  }
+
+  final authFragment = switch (authMode) {
+    CompanionAuthMode.token => '--token <gateway-token>',
+    CompanionAuthMode.password => '--password <gateway-password>',
+    CompanionAuthMode.none => null,
+  };
+
+  final pieces = <String>[
+    'openclaw devices approve $requestId',
+    "--url '$trimmedUrl'",
+    ...?authFragment == null ? null : <String>[authFragment],
+  ];
+  return pieces.join(' ');
 }

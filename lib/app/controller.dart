@@ -506,9 +506,11 @@ class CompanionController extends ChangeNotifier {
           error.details,
           'requestId',
         );
-        _setError(
-          'Node pairing required. Approve this companion node from an operator client, then connect again.',
+        _errorText = null;
+        _appendLog(
+          'node pairing required${_nodePairingRequestId == null ? '' : ' ($_nodePairingRequestId)'}',
         );
+        notifyListeners();
       } else {
         _setError(_describeUnknownError(error));
       }

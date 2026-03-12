@@ -75,14 +75,6 @@ class _NodePage extends StatelessWidget {
                   'Stable target',
                   controller.activeStableId ?? '—',
                 ),
-                if (controller.nodePairingRequestId != null) ...<Widget>[
-                  const SizedBox(height: 10),
-                  _HintCard(
-                    text:
-                        'Pairing is required before this node can be used. Approve request ${controller.nodePairingRequestId} from an operator client, then reconnect.',
-                    tint: const Color(0xFFF4EEE3),
-                  ),
-                ],
               ],
             ),
     );
