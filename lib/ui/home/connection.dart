@@ -192,11 +192,10 @@ class _ConnectionPanel extends StatelessWidget {
                       SegmentedButton<CompanionWorkspaceMode>(
                         segments: CompanionWorkspaceMode.values
                             .map(
-                              (mode) =>
-                                  ButtonSegment<CompanionWorkspaceMode>(
-                                    value: mode,
-                                    label: Text(mode.label),
-                                  ),
+                              (mode) => ButtonSegment<CompanionWorkspaceMode>(
+                                value: mode,
+                                label: Text(mode.label),
+                              ),
                             )
                             .toList(growable: false),
                         selected: <CompanionWorkspaceMode>{workspaceMode},
@@ -214,14 +213,27 @@ class _ConnectionPanel extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (workspaceMode == CompanionWorkspaceMode.node) ...<
-                        Widget
-                      >[
+                      if (workspaceMode ==
+                          CompanionWorkspaceMode.node) ...<Widget>[
                         const SizedBox(height: 12),
-                        const _HintCard(
+                        _HintCard(
                           text:
-                              'The first node connect may require approval from an operator client. This companion currently exposes a small safe desktop command set.',
-                          tint: Color(0xFFF4EEE3),
+                              'The first node connect may require approval from an operator client. This build keeps the baseline small and safe.',
+                          tint: const Color(0xFFF4EEE3),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: buildCompanionNodeCommandCatalog()
+                              .map(
+                                (command) => _StatePill(
+                                  label: command.name,
+                                  tint: const Color(0xFFE8E1D1),
+                                  icon: Icons.terminal_rounded,
+                                ),
+                              )
+                              .toList(growable: false),
                         ),
                       ],
                       const SizedBox(height: 12),
@@ -576,10 +588,7 @@ class _PairingApprovalCard extends StatelessWidget {
           tint: const Color(0xFFF4EEE3),
         ),
         const SizedBox(height: 12),
-        _CommandSnippet(
-          title: 'On the gateway host',
-          command: hostCommand,
-        ),
+        _CommandSnippet(title: 'On the gateway host', command: hostCommand),
         if (remoteCommand != null) ...<Widget>[
           const SizedBox(height: 12),
           _CommandSnippet(
@@ -593,10 +602,7 @@ class _PairingApprovalCard extends StatelessWidget {
 }
 
 class _CommandSnippet extends StatelessWidget {
-  const _CommandSnippet({
-    required this.title,
-    required this.command,
-  });
+  const _CommandSnippet({required this.title, required this.command});
 
   final String title;
   final String command;

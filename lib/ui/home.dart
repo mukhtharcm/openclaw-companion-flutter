@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:openclaw_companion/app/controller.dart';
 import 'package:openclaw_companion/app/models.dart';
+import 'package:openclaw_companion/app/node_support.dart';
 import 'package:openclaw_gateway/openclaw_gateway.dart';
 
 part 'home/shell.dart';

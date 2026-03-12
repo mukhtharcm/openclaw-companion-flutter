@@ -10,6 +10,10 @@ class _NodePage extends StatelessWidget {
     final snapshot = controller.nodeSnapshot;
     final loadingSnapshot = controller.busy && snapshot == null;
     final invokes = controller.nodeInvokes;
+    final commandCatalog = {
+      for (final command in buildCompanionNodeCommandCatalog())
+        command.name: command,
+    };
 
     final metricStrip = loadingSnapshot
         ? const _SkeletonMetricStrip(count: 4)
@@ -71,10 +75,7 @@ class _NodePage extends StatelessWidget {
                   'Auth role',
                   controller.client?.hello.auth?.role ?? 'node',
                 ),
-                _InfoLine(
-                  'Stable target',
-                  controller.activeStableId ?? '—',
-                ),
+                _InfoLine('Stable target', controller.activeStableId ?? '—'),
               ],
             ),
     );
@@ -85,15 +86,17 @@ class _NodePage extends StatelessWidget {
           ? const _SkeletonChipWrap(count: 5)
           : snapshot == null || snapshot.capabilities.isEmpty
           ? const _EmptyState('No capabilities declared for this platform yet.')
-          : Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          : Column(
               children: snapshot.capabilities
                   .map(
-                    (capability) => _StatePill(
-                      label: capability,
-                      tint: const Color(0xFFE8E1D1),
-                      icon: Icons.widgets_rounded,
+                    (capability) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _NodeDescriptorCard(
+                        icon: Icons.widgets_rounded,
+                        title: capability,
+                        summary: _nodeCapabilitySummary(capability),
+                        tint: const Color(0xFFE8E1D1),
+                      ),
                     ),
                   )
                   .toList(growable: false),
@@ -108,15 +111,36 @@ class _NodePage extends StatelessWidget {
           ? const _EmptyState(
               'This build only exposes node commands on supported desktop platforms.',
             )
-          : Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          : Column(
               children: snapshot.commands
                   .map(
-                    (command) => _StatePill(
-                      label: command,
-                      tint: const Color(0xFFE6EBE3),
-                      icon: Icons.terminal_rounded,
+                    (command) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _NodeDescriptorCard(
+                        icon: Icons.terminal_rounded,
+                        title: command,
+                        summary:
+                            commandCatalog[command]?.summary ??
+                            'Declared by this companion node.',
+                        tint: const Color(0xFFE6EBE3),
+                        trailing:
+                            (commandCatalog[command]?.capabilities.isNotEmpty ??
+                                false)
+                            ? Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: commandCatalog[command]!.capabilities
+                                    .map(
+                                      (capability) => _StatePill(
+                                        label: capability,
+                                        tint: const Color(0xFFF2EBDD),
+                                        icon: Icons.widgets_rounded,
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                              )
+                            : null,
+                      ),
                     ),
                   )
                   .toList(growable: false),
@@ -135,7 +159,8 @@ class _NodePage extends StatelessWidget {
               children: snapshot.permissions.entries
                   .map(
                     (entry) => _StatePill(
-                      label: '${entry.key} · ${entry.value ? 'granted' : 'blocked'}',
+                      label:
+                          '${entry.key} · ${entry.value ? 'granted' : 'blocked'}',
                       tint: entry.value
                           ? const Color(0xFFE6EBE3)
                           : const Color(0xFFE9E7E4),
@@ -265,11 +290,97 @@ class _NodePage extends StatelessWidget {
   }
 }
 
+class _NodeDescriptorCard extends StatelessWidget {
+  const _NodeDescriptorCard({
+    required this.icon,
+    required this.title,
+    required this.summary,
+    required this.tint,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String summary;
+  final Color tint;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFCF8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE3DBCF)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: tint,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(icon, size: 18, color: const Color(0xFF30453F)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        summary,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5E706B),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (trailing != null) ...<Widget>[
+              const SizedBox(height: 12),
+              trailing!,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 String _nodeInvokeStatusLabel(CompanionNodeInvokeStatus status) {
   return switch (status) {
     CompanionNodeInvokeStatus.pending => 'Pending',
     CompanionNodeInvokeStatus.success => 'Handled',
     CompanionNodeInvokeStatus.error => 'Error',
+  };
+}
+
+String _nodeCapabilitySummary(String capability) {
+  return switch (capability) {
+    'system' =>
+      'Desktop-safe system helpers such as notifications and PATH lookup.',
+    'device' =>
+      'Basic host identity and runtime details for macOS node sessions.',
+    _ => 'Declared by this companion node.',
   };
 }
 
